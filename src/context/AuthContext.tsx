@@ -5,7 +5,10 @@ import {
   isSupabaseConfigured,
   saveCustomSupabaseConfig,
   clearCustomSupabaseConfig,
-  SUPABASE_URL,
+  syncRuntimeConfig,
+  getEffectiveSupabaseUrl,
+  getEffectiveSupabaseAnonKey,
+  DEFAULT_SUPABASE_URL,
 } from '../services/supabaseClient';
 
 export type CoupleId = 'ByL' | 'AyM';
@@ -29,22 +32,21 @@ interface AuthContextType {
     couple: CoupleId,
     displayName?: string
   ) => Promise<{ error?: string; message?: string }>;
-  continueAsGuest: (couple: CoupleId, name?: string) => void;
+  resetPassword: (email: string) => Promise<{ error?: string; message?: string }>;
   signOut: () => Promise<void>;
   updateSupabaseConfig: (url: string, anonKey: string) => void;
   resetSupabaseConfig: () => void;
   supabaseUrl: string;
+  supabaseAnonKey: string;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const GUEST_STORAGE_KEY = 'galicia_auth_guest_user';
 const COUPLE_STORAGE_KEY = 'galicia_active_couple';
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
-  const [isGuest, setIsGuest] = useState<boolean>(false);
   const [activeCouple, setActiveCoupleState] = useState<CoupleId>(() => {
     try {
       const saved = localStorage.getItem(COUPLE_STORAGE_KEY);
@@ -54,10 +56,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
     return 'ByL';
   });
-  const [guestName, setGuestName] = useState<string>('Invitado');
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [authError, setAuthError] = useState<string | null>(null);
   const [isConfigured, setIsConfigured] = useState<boolean>(isSupabaseConfigured());
+  const [supabaseUrl, setSupabaseUrl] = useState<string>(getEffectiveSupabaseUrl());
+  const [supabaseAnonKey, setSupabaseAnonKey] = useState<string>(getEffectiveSupabaseAnonKey());
 
   const setActiveCouple = (couple: CoupleId) => {
     setActiveCoupleState(couple);
@@ -70,107 +73,87 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const clearError = () => setAuthError(null);
 
-  // Initialize auth state
+  // Initialize auth state and fetch runtime configuration if needed
   useEffect(() => {
     let mounted = true;
-    const client = getSupabaseClient();
-    setIsConfigured(isSupabaseConfigured());
+    let subscription: { unsubscribe: () => void } | null = null;
 
-    // Check if we have an active master session
-    try {
-      const savedMaster = localStorage.getItem('galicia_master_auth_v1');
-      if (savedMaster) {
-        const parsed = JSON.parse(savedMaster);
-        const assignedCouple: CoupleId = parsed.couple || 'ByL';
-        const masterUser: any = {
-          id: 'admin-master',
-          email: 'admin',
-          app_metadata: {},
-          user_metadata: { displayName: 'Admin', couple: assignedCouple },
-          aud: 'authenticated',
-          created_at: new Date().toISOString(),
-        };
-        setUser(masterUser);
-        setActiveCoupleState(assignedCouple);
-        setIsGuest(false);
-        setIsLoading(false);
-        return;
-      }
-    } catch {
-      // ignore
-    }
-
-    if (!client) {
-      // Check if we have a saved guest session
+    const initAuth = async () => {
+      // 1. Check emergency master admin
       try {
-        const savedGuest = localStorage.getItem(GUEST_STORAGE_KEY);
-        if (savedGuest) {
-          const parsed = JSON.parse(savedGuest);
-          if (parsed && parsed.isGuest) {
-            setIsGuest(true);
-            if (parsed.couple) setActiveCoupleState(parsed.couple);
-            if (parsed.name) setGuestName(parsed.name);
+        const savedMaster = localStorage.getItem('galicia_master_auth_v1');
+        if (savedMaster) {
+          const parsed = JSON.parse(savedMaster);
+          const assignedCouple: CoupleId = parsed.couple || 'ByL';
+          const masterUser: any = {
+            id: 'admin-master',
+            email: 'admin@galicia.local',
+            app_metadata: {},
+            user_metadata: { displayName: 'Administrador', couple: assignedCouple },
+            aud: 'authenticated',
+            created_at: new Date().toISOString(),
+          };
+          if (mounted) {
+            setUser(masterUser);
+            setActiveCoupleState(assignedCouple);
+            setIsLoading(false);
           }
+          return;
         }
       } catch {
         // ignore
       }
-      setIsLoading(false);
-      return;
-    }
 
-    // Supabase client is configured, check initial session
-    client.auth.getSession().then(({ data: { session: currentSession }, error }) => {
+      // 2. Sync runtime config from server /api/public-config
+      await syncRuntimeConfig();
       if (!mounted) return;
-      if (error) {
-        console.warn('Supabase getSession error:', error.message);
+
+      const configured = isSupabaseConfigured();
+      setIsConfigured(configured);
+      setSupabaseUrl(getEffectiveSupabaseUrl());
+      setSupabaseAnonKey(getEffectiveSupabaseAnonKey());
+
+      const client = getSupabaseClient();
+      if (!client) {
+        setIsLoading(false);
+        return;
       }
-      if (currentSession) {
-        setSession(currentSession);
-        setUser(currentSession.user);
-        setIsGuest(false);
-        const userCouple = (currentSession.user.user_metadata?.couple as CoupleId) || 'ByL';
-        setActiveCoupleState(userCouple);
-      } else {
-        // Check for guest fallback
-        try {
-          const savedGuest = localStorage.getItem(GUEST_STORAGE_KEY);
-          if (savedGuest) {
-            const parsed = JSON.parse(savedGuest);
-            if (parsed && parsed.isGuest) {
-              setIsGuest(true);
-              if (parsed.couple) setActiveCoupleState(parsed.couple);
-              if (parsed.name) setGuestName(parsed.name);
-            }
+
+      // 3. Check existing Supabase session
+      try {
+        const { data, error } = await client.auth.getSession();
+        if (mounted) {
+          if (!error && data?.session) {
+            setSession(data.session);
+            setUser(data.session.user);
+            const userCouple = (data.session.user.user_metadata?.couple as CoupleId) || 'ByL';
+            setActiveCoupleState(userCouple);
           }
-        } catch {
-          // ignore
+          setIsLoading(false);
         }
+      } catch (err) {
+        console.warn('Supabase getSession error:', err);
+        if (mounted) setIsLoading(false);
       }
-      setIsLoading(false);
-    });
 
-    const {
-      data: { subscription },
-    } = client.auth.onAuthStateChange((_event, newSession) => {
-      if (!mounted) return;
-      setSession(newSession);
-      setUser(newSession?.user ?? null);
-      if (newSession) {
-        setIsGuest(false);
-        try {
-          localStorage.removeItem(GUEST_STORAGE_KEY);
-        } catch {
-          // ignore
+      // 4. Listen to auth changes
+      const authListener = client.auth.onAuthStateChange((_event, newSession) => {
+        if (!mounted) return;
+        setSession(newSession);
+        setUser(newSession?.user ?? null);
+        if (newSession) {
+          const userCouple = (newSession.user.user_metadata?.couple as CoupleId) || activeCouple;
+          setActiveCouple(userCouple);
         }
-        const userCouple = (newSession.user.user_metadata?.couple as CoupleId) || activeCouple;
-        setActiveCouple(userCouple);
-      }
-    });
+      });
+      subscription = authListener.data.subscription;
+    };
+
+    initAuth();
 
     return () => {
       mounted = false;
-      subscription.unsubscribe();
+      if (subscription) subscription.unsubscribe();
     };
   }, []);
 
@@ -182,25 +165,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const isMasterUser = normUser === 'admin' || normUser === 'admin@galicia.local';
     const isMasterPass = password === 'soloparamisojos' || password === 'seulementpourmesyeux';
 
+    // Emergency master admin bypass
     if (isMasterUser && isMasterPass) {
       const assignedCouple: CoupleId = couple || activeCouple || 'ByL';
       const masterUser: any = {
         id: 'admin-master',
-        email: 'admin',
+        email: 'admin@galicia.local',
         app_metadata: {},
-        user_metadata: { displayName: 'Admin', couple: assignedCouple },
+        user_metadata: { displayName: 'Administrador', couple: assignedCouple },
         aud: 'authenticated',
         created_at: new Date().toISOString(),
       };
       setUser(masterUser);
-      setIsGuest(false);
       setActiveCouple(assignedCouple);
       try {
         localStorage.setItem(
           'galicia_master_auth_v1',
           JSON.stringify({ email: 'admin', couple: assignedCouple })
         );
-        localStorage.removeItem(GUEST_STORAGE_KEY);
       } catch {
         // ignore
       }
@@ -209,37 +191,41 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     const client = getSupabaseClient();
-
     if (!client) {
       setIsLoading(false);
-      const msg = 'Credenciales no válidas.';
+      const msg = 'Supabase no está configurado con la clave pública (Anon Key). Por favor, indícala en Configurar Supabase.';
       setAuthError(msg);
       return { error: msg };
     }
 
     try {
       const { data, error } = await client.auth.signInWithPassword({
-        email,
+        email: email.trim(),
         password,
       });
 
       if (error) {
-        setAuthError('Credenciales no válidas.');
+        let userFriendlyMsg = error.message;
+        if (error.message.includes('Invalid login credentials')) {
+          userFriendlyMsg = 'Credenciales no válidas. Comprueba el email y la contraseña registrados en Supabase.';
+        } else if (error.message.includes('Email not confirmed')) {
+          userFriendlyMsg = 'Tu usuario en Supabase está pendiente de confirmación. Confírmalo en Supabase Studio -> Users o revisa tu email.';
+        }
+        setAuthError(userFriendlyMsg);
         setIsLoading(false);
-        return { error: 'Credenciales no válidas.' };
+        return { error: userFriendlyMsg };
       }
 
       if (data.user) {
         setUser(data.user);
         setSession(data.session);
-        setIsGuest(false);
         const assignedCouple = couple || (data.user.user_metadata?.couple as CoupleId) || 'ByL';
         setActiveCouple(assignedCouple);
       }
       setIsLoading(false);
       return {};
-    } catch {
-      const msg = 'Credenciales no válidas.';
+    } catch (err: any) {
+      const msg = err?.message || 'Error al conectar con Supabase Auth';
       setAuthError(msg);
       setIsLoading(false);
       return { error: msg };
@@ -258,14 +244,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     if (!client) {
       setIsLoading(false);
-      const msg = 'Supabase no está configurado en las variables de entorno. Puedes usar el Acceso Rápido/Demo o conectar tu instancia.';
+      const msg = 'Supabase no está configurado. Introduce la clave Anon en Configurar Supabase.';
       setAuthError(msg);
       return { error: msg };
     }
 
     try {
       const { data, error } = await client.auth.signUp({
-        email,
+        email: email.trim(),
         password,
         options: {
           data: {
@@ -284,40 +270,38 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (data.session) {
         setUser(data.user);
         setSession(data.session);
-        setIsGuest(false);
         setActiveCouple(couple);
         setIsLoading(false);
         return {};
       } else {
-        // Confirmation email required by Supabase settings
+        // Confirmation email required
         setIsLoading(false);
         return {
           message:
-            'Cuenta creada. Si la confirmación de email está activa en Supabase, revisa tu bandeja de entrada para verificar tu cuenta.',
+            'Usuario registrado en Supabase. Si tu instancia requiere confirmación por email, actívalo en Supabase Studio -> Users o revisa tu bandeja.',
         };
       }
     } catch (err: any) {
-      const msg = err?.message || 'Error al registrar usuario';
+      const msg = err?.message || 'Error al registrar usuario en Supabase';
       setAuthError(msg);
       setIsLoading(false);
       return { error: msg };
     }
   };
 
-  const continueAsGuest = (couple: CoupleId, name?: string) => {
-    const finalName = name || (couple === 'ByL' ? 'Bruno & Loles' : 'Alberto & Mari');
-    setIsGuest(true);
-    setUser(null);
-    setSession(null);
-    setActiveCouple(couple);
-    setGuestName(finalName);
+  const resetPassword = async (email: string) => {
+    const client = getSupabaseClient();
+    if (!client) {
+      return { error: 'Supabase no configurado' };
+    }
     try {
-      localStorage.setItem(
-        GUEST_STORAGE_KEY,
-        JSON.stringify({ isGuest: true, couple, name: finalName, timestamp: Date.now() })
-      );
-    } catch {
-      // ignore
+      const { error } = await client.auth.resetPasswordForEmail(email.trim(), {
+        redirectTo: `${window.location.origin}/reset-password`,
+      });
+      if (error) return { error: error.message };
+      return { message: 'Enlace de restablecimiento enviado si el email existe en Supabase.' };
+    } catch (err: any) {
+      return { error: err?.message || 'Error al solicitar restablecimiento' };
     }
   };
 
@@ -333,9 +317,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
     setUser(null);
     setSession(null);
-    setIsGuest(false);
     try {
-      localStorage.removeItem(GUEST_STORAGE_KEY);
       localStorage.removeItem('galicia_master_auth_v1');
     } catch {
       // ignore
@@ -346,19 +328,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const updateSupabaseConfig = (url: string, anonKey: string) => {
     saveCustomSupabaseConfig(url, anonKey);
     setIsConfigured(isSupabaseConfigured());
+    setSupabaseUrl(getEffectiveSupabaseUrl());
+    setSupabaseAnonKey(getEffectiveSupabaseAnonKey());
   };
 
   const resetSupabaseConfig = () => {
     clearCustomSupabaseConfig();
     setIsConfigured(isSupabaseConfigured());
+    setSupabaseUrl(DEFAULT_SUPABASE_URL);
+    setSupabaseAnonKey('');
   };
 
   const displayName =
     user?.user_metadata?.displayName ||
     user?.email?.split('@')[0] ||
-    (isGuest ? guestName : 'Pasajero');
+    (activeCouple === 'ByL' ? 'Bruno & Loles' : 'Alberto & Mari');
 
-  const isAuthenticated = Boolean(user || isGuest);
+  // Supabase (or emergency master user) strictly controls access
+  const isAuthenticated = Boolean(user);
 
   return (
     <AuthContext.Provider
@@ -368,7 +355,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         activeCouple,
         setActiveCouple,
         displayName,
-        isGuest,
+        isGuest: false,
         isAuthenticated,
         isConfigured,
         isLoading,
@@ -376,11 +363,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         clearError,
         signInWithEmail,
         signUpWithEmail,
-        continueAsGuest,
+        resetPassword,
         signOut,
         updateSupabaseConfig,
         resetSupabaseConfig,
-        supabaseUrl: SUPABASE_URL,
+        supabaseUrl,
+        supabaseAnonKey,
       }}
     >
       {children}

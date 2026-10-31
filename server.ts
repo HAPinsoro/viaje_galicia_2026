@@ -25,6 +25,24 @@ app.use((_req, res, next) => {
 
 app.use(express.json());
 
+// Public runtime config endpoint: provides Supabase & Maps keys from server environment
+app.get('/api/public-config', (_req: Request, res: Response) => {
+  res.json({
+    supabaseUrl:
+      process.env.VITE_SUPABASE_URL ||
+      process.env.SUPABASE_URL ||
+      'https://supabase.viajes.cloud',
+    supabaseAnonKey:
+      process.env.VITE_SUPABASE_ANON_KEY ||
+      process.env.SUPABASE_ANON_KEY ||
+      '',
+    googleMapsApiKey:
+      process.env.VITE_GOOGLE_MAPS_API_KEY ||
+      process.env.GOOGLE_MAPS_API_KEY ||
+      '',
+  });
+});
+
 // Initialize Gemini SDK with server-side API Key
 const apiKey = process.env.GEMINI_API_KEY || '';
 const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
