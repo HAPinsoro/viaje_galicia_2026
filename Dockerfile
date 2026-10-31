@@ -9,7 +9,7 @@ WORKDIR /app
 
 # Install dependencies needed for build
 COPY package*.json ./
-RUN npm ci
+RUN npm install --legacy-peer-deps
 
 # Copy application source code
 COPY . .
@@ -37,7 +37,7 @@ ENV PORT=3000
 
 # Install production and runtime runner tools
 COPY package*.json ./
-RUN npm ci --omit=dev && npm install -g tsx
+RUN npm install --omit=dev --legacy-peer-deps && npm install -g tsx
 
 # Copy built frontend assets and server entry point
 COPY --from=builder /app/dist ./dist
