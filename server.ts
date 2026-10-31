@@ -4,7 +4,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs';
 import { execSync } from 'child_process';
-import { initPostgresSchema, pool, isPostgresConfigured } from './src/db/postgres';
+import { initPostgresSchema, pool, isPostgresConfigured, seedPostgresDatabase } from './src/db/postgres';
 
 dotenv.config();
 
@@ -254,6 +254,16 @@ app.get('/api/db/status', async (_req: Request, res: Response) => {
     return res.json({ enabled: true, connected: true, engine: 'postgres', timestamp: result.rows[0].now });
   } catch (err: any) {
     return res.json({ enabled: true, connected: false, engine: 'postgres', error: err.message });
+  }
+});
+
+// Seed Database Endpoint with local data
+app.post('/api/db/seed', async (_req: Request, res: Response) => {
+  const result = await seedPostgresDatabase();
+  if (result.success) {
+    return res.json(result);
+  } else {
+    return res.status(500).json(result);
   }
 });
 

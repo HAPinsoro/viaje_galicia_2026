@@ -1,0 +1,27 @@
+# ===================================================================
+# Expedición Galicia 10 Días - Environment Variables (.env)
+# ===================================================================
+
+# 1. Supabase Authentication & Database (Hostinger VPS / Coolify)
+VITE_SUPABASE_URL="https://supabase.viajes.cloud"
+VITE_SUPABASE_ANON_KEY=""
+
+# 2. PostgreSQL Relacional (VPS / Coolify)
+DATABASE_URL="postgresql://postgres:galicia2026_secure_pass@localhost:5432/galicia_trip"
+PGHOST="localhost"
+PGPORT="5432"
+PGDATABASE="galicia_trip"
+PGUSER="postgres"
+PGPASSWORD="galicia2026_secure_pass"
+
+# 3. Google Gemini API (Server-side)
+GEMINI_API_KEY=""
+
+# 4. Google Maps Platform (Client-side)
+VITE_GOOGLE_MAPS_API_KEY="AIzaSyCxScswOBgtWnP1A5IrkesGhs59UoYl4w4"
+VITE_GOOGLE_MAPS_MAP_ID="DEMO_MAP_ID"
+
+# 5. Server Configuration
+PORT=3000
+NODE_ENV="production"
+APP_URL="https://galicia.viajes.cloud"
