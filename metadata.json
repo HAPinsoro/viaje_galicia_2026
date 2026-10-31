@@ -1,0 +1,6 @@
+{
+  "name": "Ruta Galicia 10 Días - Pinsoro a Galicia",
+  "description": "Planificador y mapa interactivo optimizado para viaje de 10 días desde Pinsoro (Zaragoza) a Galicia para 4 personas, con paradas turísticas, gastronómicas y apartamentos céntricos <120€/noche con parking incluido o cercano.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

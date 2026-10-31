@@ -1,0 +1,249 @@
+{
+  "entities": {
+    "Expense": {
+      "title": "Expense",
+      "description": "Gasto personalizado o adicional para la expedición a Galicia",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Identificador único del gasto",
+          "maxLength": 128
+        },
+        "title": {
+          "type": "string",
+          "description": "Título o concepto del gasto",
+          "maxLength": 200
+        },
+        "category": {
+          "type": "string",
+          "description": "Categoría del gasto",
+          "enum": ["rental", "excursion", "tickets", "gifts", "other"]
+        },
+        "amount": {
+          "type": "number",
+          "description": "Importe en euros"
+        },
+        "isPerPerson": {
+          "type": "boolean",
+          "description": "Indica si el importe es por comensal o total del grupo"
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "Indica si el gasto está computado en el presupuesto total"
+        },
+        "notes": {
+          "type": "string",
+          "description": "Observaciones adicionales o detalle",
+          "maxLength": 500
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Fecha y hora de creación"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Fecha y hora de última modificación"
+        }
+      },
+      "required": ["id", "title", "category", "amount", "isPerPerson", "enabled"]
+    },
+    "TripSettings": {
+      "title": "TripSettings",
+      "description": "Configuración y parámetros calculados del viaje",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Identificador único de la configuración",
+          "maxLength": 64
+        },
+        "fuelPricePerLiter": {
+          "type": "number",
+          "description": "Precio estimado del carburante por litro"
+        },
+        "carConsumption": {
+          "type": "number",
+          "description": "Consumo medio del coche en litros cada 100km"
+        },
+        "foodDailyBudgetPerPax": {
+          "type": "number",
+          "description": "Presupuesto diario por persona para restauración"
+        },
+        "totalPax": {
+          "type": "number",
+          "description": "Número de pasajeros"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Fecha y hora de actualización"
+        }
+      },
+      "required": ["fuelPricePerLiter", "carConsumption", "foodDailyBudgetPerPax", "totalPax"]
+    },
+    "ChecklistItem": {
+      "title": "ChecklistItem",
+      "description": "Elemento de verificación previa al viaje de Pinsoro a Galicia",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Identificador del elemento",
+          "maxLength": 64
+        },
+        "title": {
+          "type": "string",
+          "description": "Descripción de la tarea o verificación",
+          "maxLength": 250
+        },
+        "completed": {
+          "type": "boolean",
+          "description": "Estado de realización"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Última fecha de actualización"
+        }
+      },
+      "required": ["id", "title", "completed"]
+    },
+    "UserApartment": {
+      "title": "UserApartment",
+      "description": "Apartamento personalizado registrado por el usuario para una de las 9 noches de la ruta",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "ID único del apartamento (ej: apt-day-1)",
+          "maxLength": 128
+        },
+        "dayNumber": {
+          "type": "number",
+          "description": "Número de día/noche de la ruta (1 a 9)"
+        },
+        "nightDate": {
+          "type": "string",
+          "description": "Fecha de la noche de alojamiento",
+          "maxLength": 100
+        },
+        "city": {
+          "type": "string",
+          "description": "Ciudad o localidad del alojamiento",
+          "maxLength": 100
+        },
+        "name": {
+          "type": "string",
+          "description": "Nombre del apartamento",
+          "maxLength": 200
+        },
+        "address": {
+          "type": "string",
+          "description": "Dirección completa del apartamento",
+          "maxLength": 300
+        },
+        "price": {
+          "type": "number",
+          "description": "Precio total en euros por noche para el grupo / calculado por pareja"
+        },
+        "checkInTime": {
+          "type": "string",
+          "description": "Hora de check-in / entrada en el apartamento (ej: 15:00)",
+          "maxLength": 100
+        },
+        "checkOutTime": {
+          "type": "string",
+          "description": "Hora de check-out / salida del apartamento (ej: 11:00)",
+          "maxLength": 100
+        },
+        "freeCancellation": {
+          "type": "boolean",
+          "description": "Indica si cuenta con cancelación gratuita"
+        },
+        "cancellationPolicy": {
+          "type": "string",
+          "description": "Condiciones o fecha límite de cancelación gratuita",
+          "maxLength": 300
+        },
+        "parking": {
+          "type": "string",
+          "description": "Detalles del aparcamiento (incluido, privado, público, etc.)",
+          "maxLength": 300
+        },
+        "distanceToCenter": {
+          "type": "string",
+          "description": "Distancia al centro a pie o en coche",
+          "maxLength": 200
+        },
+        "bathrooms": {
+          "type": "number",
+          "description": "Número de baños completos"
+        },
+        "notes": {
+          "type": "string",
+          "description": "Notas, claves de check-in, enlaces o detalles del apartamento",
+          "maxLength": 2000
+        },
+        "isSelected": {
+          "type": "boolean",
+          "description": "Indica si es el apartamento seleccionado para esa noche"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Fecha y hora de creación"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Fecha y hora de actualización"
+        }
+      },
+      "required": ["id", "dayNumber", "name", "address", "price", "freeCancellation", "parking", "distanceToCenter", "bathrooms", "notes"]
+    },
+    "DayNote": {
+      "title": "DayNote",
+      "type": "object",
+      "description": "Notas personalizadas y observaciones del usuario para cada etapa de la ruta",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Identificador único de la nota del día (ej: day-1)"
+        },
+        "dayNumber": {
+          "type": "number",
+          "description": "Número de día del 1 al 10"
+        },
+        "notes": {
+          "type": "string",
+          "description": "Contenido de las notas personales para esta etapa",
+          "maxLength": 3000
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Fecha y hora de actualización"
+        }
+      },
+      "required": ["id", "dayNumber", "notes"]
+    }
+  },
+  "firestore": {
+    "/expenses/{expenseId}": {
+      "schema": "Expense",
+      "description": "Colección de gastos compartidos para el grupo de viaje"
+    },
+    "/trip_settings/{settingId}": {
+      "schema": "TripSettings",
+      "description": "Parámetros y coeficientes de cálculo de combustible y comidas"
+    },
+    "/checklist/{itemId}": {
+      "schema": "ChecklistItem",
+      "description": "Checklist compartido para la preparación del coche y autorizaciones"
+    },
+    "/apartments/{apartmentId}": {
+      "schema": "UserApartment",
+      "description": "Apartamentos registrados por el usuario para cada una de las noches del viaje"
+    },
+    "/day_notes/{noteId}": {
+      "schema": "DayNote",
+      "description": "Notas y observaciones del usuario para cada una de las 10 etapas del viaje"
+    }
+  }
+}

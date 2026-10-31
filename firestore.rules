@@ -1,0 +1,137 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default-deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidExpense(data) {
+      return data.keys().hasAll(['id', 'title', 'category', 'amount', 'isPerPerson', 'enabled']) &&
+        data.keys().hasOnly(['id', 'title', 'title_es', 'title_fr', 'category', 'amount', 'isPerPerson', 'enabled', 'assignedTo', 'notes', 'notes_es', 'notes_fr', 'createdAt', 'updatedAt']) &&
+        data.id is string && data.id.size() <= 128 && data.id.size() > 0 &&
+        data.title is string && data.title.size() <= 200 && data.title.size() > 0 &&
+        (!('title_es' in data) || (data.title_es is string && data.title_es.size() <= 200)) &&
+        (!('title_fr' in data) || (data.title_fr is string && data.title_fr.size() <= 200)) &&
+        data.category in ['rental', 'excursion', 'tickets', 'gifts', 'other'] &&
+        (data.amount is number || data.amount is int || data.amount is float) && data.amount >= 0 && data.amount <= 100000 &&
+        data.isPerPerson is bool &&
+        data.enabled is bool &&
+        (!('assignedTo' in data) || (data.assignedTo in ['both', 'ByL', 'AyM'])) &&
+        (!('notes' in data) || (data.notes is string && data.notes.size() <= 500)) &&
+        (!('notes_es' in data) || (data.notes_es is string && data.notes_es.size() <= 500)) &&
+        (!('notes_fr' in data) || (data.notes_fr is string && data.notes_fr.size() <= 500)) &&
+        (!('createdAt' in data) || (data.createdAt is string && data.createdAt.size() <= 64)) &&
+        (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64));
+    }
+
+    function isValidTripSettings(data) {
+      return data.keys().hasAll(['fuelPricePerLiter', 'carConsumption', 'foodDailyBudgetPerPax', 'totalPax']) &&
+        data.keys().hasOnly(['id', 'fuelPricePerLiter', 'carConsumption', 'foodDailyBudgetPerPax', 'totalPax', 'updatedAt']) &&
+        (data.fuelPricePerLiter is number || data.fuelPricePerLiter is int || data.fuelPricePerLiter is float) && data.fuelPricePerLiter >= 0.5 && data.fuelPricePerLiter <= 10.0 &&
+        (data.carConsumption is number || data.carConsumption is int || data.carConsumption is float) && data.carConsumption >= 1.0 && data.carConsumption <= 30.0 &&
+        (data.foodDailyBudgetPerPax is number || data.foodDailyBudgetPerPax is int || data.foodDailyBudgetPerPax is float) && data.foodDailyBudgetPerPax >= 5.0 && data.foodDailyBudgetPerPax <= 500.0 &&
+        (data.totalPax is number || data.totalPax is int) && data.totalPax >= 1 && data.totalPax <= 50 &&
+        (!('id' in data) || (data.id is string && data.id.size() <= 64)) &&
+        (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64));
+    }
+
+    function isValidChecklistItem(data) {
+      return data.keys().hasAll(['id', 'title', 'completed']) &&
+        data.keys().hasOnly(['id', 'title', 'title_es', 'title_fr', 'completed', 'category', 'targetCouple', 'updatedAt']) &&
+        data.id is string && data.id.size() <= 64 &&
+        data.title is string && data.title.size() <= 250 &&
+        (!('title_es' in data) || (data.title_es is string && data.title_es.size() <= 250)) &&
+        (!('title_fr' in data) || (data.title_fr is string && data.title_fr.size() <= 250)) &&
+        data.completed is bool &&
+        (!('category' in data) || (data.category is string && data.category.size() <= 64)) &&
+        (!('targetCouple' in data) || (data.targetCouple in ['ByL', 'AyM', 'general'])) &&
+        (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64));
+    }
+
+    function isValidApartment(data) {
+      return data.keys().hasAll(['id', 'dayNumber', 'name', 'address', 'price', 'freeCancellation', 'parking', 'distanceToCenter', 'bathrooms', 'notes']) &&
+        data.keys().hasOnly(['id', 'dayNumber', 'nightDate', 'city', 'name', 'address', 'price', 'checkInTime', 'checkOutTime', 'freeCancellation', 'cancellationPolicy', 'parking', 'distanceToCenter', 'bathrooms', 'notes', 'isSelected', 'createdAt', 'updatedAt']) &&
+        data.id is string && data.id.size() <= 128 &&
+        (data.dayNumber is number || data.dayNumber is int) && data.dayNumber >= 1 && data.dayNumber <= 10 &&
+        data.name is string && data.name.size() <= 200 &&
+        data.address is string && data.address.size() <= 300 &&
+        (data.price is number || data.price is int || data.price is float) && data.price >= 0 && data.price <= 50000 &&
+        data.freeCancellation is bool &&
+        data.parking is string && data.parking.size() <= 300 &&
+        data.distanceToCenter is string && data.distanceToCenter.size() <= 200 &&
+        (data.bathrooms is number || data.bathrooms is int || data.bathrooms is float) && data.bathrooms >= 0 && data.bathrooms <= 20 &&
+        data.notes is string && data.notes.size() <= 2000 &&
+        (!('checkInTime' in data) || (data.checkInTime is string && data.checkInTime.size() <= 100)) &&
+        (!('checkOutTime' in data) || (data.checkOutTime is string && data.checkOutTime.size() <= 100)) &&
+        (!('nightDate' in data) || (data.nightDate is string && data.nightDate.size() <= 100)) &&
+        (!('city' in data) || (data.city is string && data.city.size() <= 100)) &&
+        (!('cancellationPolicy' in data) || (data.cancellationPolicy is string && data.cancellationPolicy.size() <= 300)) &&
+        (!('isSelected' in data) || data.isSelected is bool) &&
+        (!('createdAt' in data) || (data.createdAt is string && data.createdAt.size() <= 64)) &&
+        (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64));
+    }
+
+    function isValidDayNote(data) {
+      return data.keys().hasAll(['id', 'dayNumber', 'notes']) &&
+        data.keys().hasOnly(['id', 'dayNumber', 'notes', 'updatedAt']) &&
+        data.id is string && data.id.size() <= 64 &&
+        (data.dayNumber is number || data.dayNumber is int) && data.dayNumber >= 1 && data.dayNumber <= 10 &&
+        data.notes is string && data.notes.size() <= 3000 &&
+        (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64));
+    }
+
+    match /expenses/{expenseId} {
+      allow get: if isValidId(expenseId);
+      allow list: if true;
+      allow create: if isValidId(expenseId) && isValidExpense(incoming()) && incoming().id == expenseId;
+      allow update: if isValidId(expenseId) && isValidExpense(incoming()) && incoming().id == expenseId;
+      allow delete: if isValidId(expenseId);
+    }
+
+    match /trip_settings/{settingId} {
+      allow get: if isValidId(settingId);
+      allow list: if true;
+      allow create: if isValidId(settingId) && isValidTripSettings(incoming());
+      allow update: if isValidId(settingId) && isValidTripSettings(incoming());
+      allow delete: if isValidId(settingId);
+    }
+
+    match /checklist/{itemId} {
+      allow get: if isValidId(itemId);
+      allow list: if true;
+      allow create: if isValidId(itemId) && isValidChecklistItem(incoming()) && incoming().id == itemId;
+      allow update: if isValidId(itemId) && isValidChecklistItem(incoming()) && incoming().id == itemId;
+      allow delete: if isValidId(itemId);
+    }
+
+    match /apartments/{apartmentId} {
+      allow get: if isValidId(apartmentId);
+      allow list: if true;
+      allow create: if isValidId(apartmentId) && isValidApartment(incoming()) && incoming().id == apartmentId;
+      allow update: if isValidId(apartmentId) && isValidApartment(incoming()) && incoming().id == apartmentId;
+      allow delete: if isValidId(apartmentId);
+    }
+
+    match /day_notes/{noteId} {
+      allow get: if isValidId(noteId);
+      allow list: if true;
+      allow create: if isValidId(noteId) && isValidDayNote(incoming()) && incoming().id == noteId;
+      allow update: if isValidId(noteId) && isValidDayNote(incoming()) && incoming().id == noteId;
+      allow delete: if isValidId(noteId);
+    }
+  }
+}
