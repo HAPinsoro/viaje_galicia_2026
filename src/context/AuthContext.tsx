@@ -1,7 +1,13 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import type { User, Session } from '@supabase/supabase-js';
 import {
-  getSupabaseClient,
+  signIn as authSignIn,
+  signUp as authSignUp,
+  signOut as authSignOut,
+  resetPassword as authResetPassword,
+  supabase,
+} from '../services/auth';
+import {
   isSupabaseConfigured,
   saveCustomSupabaseConfig,
   clearCustomSupabaseConfig,
@@ -29,7 +35,7 @@ interface AuthContextType {
   signUpWithEmail: (
     email: string,
     password: string,
-    couple: CoupleId,
+    couple?: CoupleId,
     displayName?: string
   ) => Promise<{ error?: string; message?: string }>;
   resetPassword: (email: string) => Promise<{ error?: string; message?: string }>;
@@ -113,15 +119,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setSupabaseUrl(getEffectiveSupabaseUrl());
       setSupabaseAnonKey(getEffectiveSupabaseAnonKey());
 
-      const client = getSupabaseClient();
-      if (!client) {
-        setIsLoading(false);
-        return;
-      }
-
       // 3. Check existing Supabase session
       try {
-        const { data, error } = await client.auth.getSession();
+        const { data, error } = await supabase.auth.getSession();
         if (mounted) {
           if (!error && data?.session) {
             setSession(data.session);
@@ -137,7 +137,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       // 4. Listen to auth changes
-      const authListener = client.auth.onAuthStateChange((_event, newSession) => {
+      const authListener = supabase.auth.onAuthStateChange((_event: any, newSession: Session | null) => {
         if (!mounted) return;
         setSession(newSession);
         setUser(newSession?.user ?? null);
@@ -161,167 +161,62 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setAuthError(null);
     setIsLoading(true);
 
-    const normUser = email.trim().toLowerCase();
-    const isMasterUser = normUser === 'admin' || normUser === 'admin@galicia.local';
-    const isMasterPass = password === 'soloparamisojos' || password === 'seulementpourmesyeux';
+    const res = await authSignIn(email, password);
+    setIsLoading(false);
 
-    // Emergency master admin bypass
-    if (isMasterUser && isMasterPass) {
-      const assignedCouple: CoupleId = couple || activeCouple || 'ByL';
-      const masterUser: any = {
-        id: 'admin-master',
-        email: 'admin@galicia.local',
-        app_metadata: {},
-        user_metadata: { displayName: 'Administrador', couple: assignedCouple },
-        aud: 'authenticated',
-        created_at: new Date().toISOString(),
-      };
-      setUser(masterUser);
+    if (res.error) {
+      setAuthError(res.error);
+      return { error: res.error };
+    }
+
+    if (res.user) {
+      setUser(res.user);
+      if (res.session) setSession(res.session);
+      const assignedCouple: CoupleId =
+        couple || (res.user.user_metadata?.couple as CoupleId) || activeCouple || 'AyM';
       setActiveCouple(assignedCouple);
-      try {
-        localStorage.setItem(
-          'galicia_master_auth_v1',
-          JSON.stringify({ email: 'admin', couple: assignedCouple })
-        );
-      } catch {
-        // ignore
-      }
-      setIsLoading(false);
-      return {};
     }
 
-    const client = getSupabaseClient();
-    if (!client) {
-      setIsLoading(false);
-      const msg = 'Supabase no está configurado con la clave pública (Anon Key). Por favor, indícala en Configurar Supabase.';
-      setAuthError(msg);
-      return { error: msg };
-    }
-
-    try {
-      const { data, error } = await client.auth.signInWithPassword({
-        email: email.trim(),
-        password,
-      });
-
-      if (error) {
-        let userFriendlyMsg = error.message;
-        if (error.message.includes('Invalid login credentials')) {
-          userFriendlyMsg = 'Credenciales no válidas. Comprueba el email y la contraseña registrados en Supabase.';
-        } else if (error.message.includes('Email not confirmed')) {
-          userFriendlyMsg = 'Tu usuario en Supabase está pendiente de confirmación. Confírmalo en Supabase Studio -> Users o revisa tu email.';
-        }
-        setAuthError(userFriendlyMsg);
-        setIsLoading(false);
-        return { error: userFriendlyMsg };
-      }
-
-      if (data.user) {
-        setUser(data.user);
-        setSession(data.session);
-        const assignedCouple = couple || (data.user.user_metadata?.couple as CoupleId) || 'ByL';
-        setActiveCouple(assignedCouple);
-      }
-      setIsLoading(false);
-      return {};
-    } catch (err: any) {
-      const msg = err?.message || 'Error al conectar con Supabase Auth';
-      setAuthError(msg);
-      setIsLoading(false);
-      return { error: msg };
-    }
+    return {};
   };
 
   const signUpWithEmail = async (
     email: string,
     password: string,
-    couple: CoupleId,
+    couple: CoupleId = 'AyM',
     displayName?: string
   ) => {
     setAuthError(null);
     setIsLoading(true);
-    const client = getSupabaseClient();
 
-    if (!client) {
-      setIsLoading(false);
-      const msg = 'Supabase no está configurado. Introduce la clave Anon en Configurar Supabase.';
-      setAuthError(msg);
-      return { error: msg };
+    const res = await authSignUp(email, password, displayName);
+    setIsLoading(false);
+
+    if (res.error) {
+      setAuthError(res.error);
+      return { error: res.error };
     }
 
-    try {
-      const { data, error } = await client.auth.signUp({
-        email: email.trim(),
-        password,
-        options: {
-          data: {
-            couple,
-            displayName: displayName || (couple === 'ByL' ? 'Bruno y Loles (ByL)' : 'Alberto y Mari (AyM)'),
-          },
-        },
-      });
-
-      if (error) {
-        setAuthError(error.message);
-        setIsLoading(false);
-        return { error: error.message };
-      }
-
-      if (data.session) {
-        setUser(data.user);
-        setSession(data.session);
-        setActiveCouple(couple);
-        setIsLoading(false);
-        return {};
-      } else {
-        // Confirmation email required
-        setIsLoading(false);
-        return {
-          message:
-            'Usuario registrado en Supabase. Si tu instancia requiere confirmación por email, actívalo en Supabase Studio -> Users o revisa tu bandeja.',
-        };
-      }
-    } catch (err: any) {
-      const msg = err?.message || 'Error al registrar usuario en Supabase';
-      setAuthError(msg);
-      setIsLoading(false);
-      return { error: msg };
+    if (res.user) {
+      setUser(res.user);
+      if (res.session) setSession(res.session);
+      const assignedCouple: CoupleId =
+        couple || (res.user.user_metadata?.couple as CoupleId) || activeCouple || 'AyM';
+      setActiveCouple(assignedCouple);
     }
+
+    return { message: res.message };
   };
 
   const resetPassword = async (email: string) => {
-    const client = getSupabaseClient();
-    if (!client) {
-      return { error: 'Supabase no configurado' };
-    }
-    try {
-      const { error } = await client.auth.resetPasswordForEmail(email.trim(), {
-        redirectTo: `${window.location.origin}/reset-password`,
-      });
-      if (error) return { error: error.message };
-      return { message: 'Enlace de restablecimiento enviado si el email existe en Supabase.' };
-    } catch (err: any) {
-      return { error: err?.message || 'Error al solicitar restablecimiento' };
-    }
+    return authResetPassword(email);
   };
 
   const signOut = async () => {
     setIsLoading(true);
-    const client = getSupabaseClient();
-    if (client) {
-      try {
-        await client.auth.signOut();
-      } catch (err) {
-        console.warn('Sign out error:', err);
-      }
-    }
+    await authSignOut();
     setUser(null);
     setSession(null);
-    try {
-      localStorage.removeItem('galicia_master_auth_v1');
-    } catch {
-      // ignore
-    }
     setIsLoading(false);
   };
 

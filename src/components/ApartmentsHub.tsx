@@ -5,6 +5,7 @@ import {
   subscribeToApartments,
   saveApartmentToCloud,
   deleteApartmentFromCloud,
+  fetchApartmentsFromSupabase,
 } from '../services/tripPersistence';
 import {
   Home,
@@ -23,6 +24,8 @@ import {
   Check,
   Copy,
   X,
+  RefreshCw,
+  Database,
   Building,
 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
@@ -58,7 +61,9 @@ export const ApartmentsHub: React.FC<ApartmentsHubProps> = () => {
   const [formNotes, setFormNotes] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
 
-  // Subscribe to real-time apartments from Firestore
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  // Subscribe to real-time apartments from Supabase / Postgres
   useEffect(() => {
     const unsub = subscribeToApartments((items, source) => {
       setApartments(items);
@@ -68,6 +73,16 @@ export const ApartmentsHub: React.FC<ApartmentsHubProps> = () => {
     });
     return () => unsub();
   }, []);
+
+  const handleSyncFromSupabase = async () => {
+    setIsSyncing(true);
+    const fresh = await fetchApartmentsFromSupabase();
+    if (fresh && fresh.length > 0) {
+      setApartments(fresh);
+      setSyncStatus('synced');
+    }
+    setTimeout(() => setIsSyncing(false), 500);
+  };
 
   const totalRegistered = apartments.length;
   const totalCost = apartments.reduce((acc, curr) => acc + (Number(curr.price) || 0), 0);
@@ -335,6 +350,15 @@ export const ApartmentsHub: React.FC<ApartmentsHubProps> = () => {
         </div>
 
         <div className="flex items-center gap-2">
+          <button
+            onClick={handleSyncFromSupabase}
+            disabled={isSyncing}
+            title={isFr ? 'Recharger directement depuis Supabase' : 'Recargar directamente desde Supabase'}
+            className="bg-[#141414] hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white px-3 py-1.5 rounded-lg text-xs font-mono font-medium flex items-center gap-1.5 transition-all cursor-pointer"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 text-blue-400 ${isSyncing ? 'animate-spin' : ''}`} />
+            <span>{isFr ? 'Sync Supabase' : 'Sync Supabase'}</span>
+          </button>
           <button
             onClick={handleCopySummary}
             className="bg-[#141414] hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white px-3 py-1.5 rounded-lg text-xs font-mono font-medium flex items-center gap-1.5 transition-all cursor-pointer"

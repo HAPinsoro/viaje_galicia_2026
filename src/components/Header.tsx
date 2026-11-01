@@ -27,7 +27,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenAiModal,
 }) => {
   const { t } = useLanguage();
-  const { user, activeCouple, setActiveCouple, displayName, isGuest, isConfigured, signOut } = useAuth();
+  const { user, displayName, isGuest, signOut } = useAuth();
 
   return (
     <header className="sticky top-0 z-30 bg-[#0F0F0F] border-b border-slate-800 shadow-2xl">
@@ -47,15 +47,6 @@ export const Header: React.FC<HeaderProps> = ({
                 <span className="hidden sm:inline-block text-[10px] font-mono bg-blue-500/10 text-blue-400 border border-blue-500/30 px-2 py-0.5 rounded font-semibold tracking-wider uppercase">
                   {t('twoCouples', '2 Parejas (4 Pasajeros)')}
                 </span>
-                {isConfigured ? (
-                  <span className="hidden lg:inline-flex items-center gap-1 text-[10px] font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded font-semibold tracking-wider uppercase">
-                    ⚡ Supabase VPS
-                  </span>
-                ) : (
-                  <span className="hidden lg:inline-flex items-center gap-1 text-[10px] font-mono bg-amber-500/10 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded font-semibold tracking-wider uppercase">
-                    ☁️ {t('firestoreActive', 'Modo Local / Demo')}
-                  </span>
-                )}
               </div>
               <span className="text-[11px] text-slate-500 font-mono uppercase tracking-wider">
                 {t('appSubtitle', 'Pinsoro (Zgz) → Galicia | 10 Días (9 Noches) | Circuito Completo')}
@@ -63,40 +54,12 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           </div>
 
-          {/* User & Couple Profile Pill */}
+          {/* User Profile Pill & Actions */}
           <div className="flex items-center gap-2">
-            {/* Couple Switcher Pill */}
-            <div className="flex items-center bg-slate-900 border border-slate-800 rounded-lg p-0.5 text-xs font-mono">
-              <button
-                type="button"
-                onClick={() => setActiveCouple('ByL')}
-                title="Cambiar a Pareja ByL (Bruno & Loles)"
-                className={`px-2 py-1 rounded text-[11px] transition-all cursor-pointer ${
-                  activeCouple === 'ByL'
-                    ? 'bg-blue-600 text-white font-bold shadow'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                ByL
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveCouple('AyM')}
-                title="Cambiar a Pareja AyM (Alberto & Mari)"
-                className={`px-2 py-1 rounded text-[11px] transition-all cursor-pointer ${
-                  activeCouple === 'AyM'
-                    ? 'bg-purple-600 text-white font-bold shadow'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                AyM
-              </button>
-            </div>
-
             {/* User display & Sign Out */}
-            <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 bg-slate-900 border border-slate-800 rounded-lg text-xs">
+            <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-xs">
               <User className="w-3.5 h-3.5 text-slate-400" />
-              <span className="text-slate-300 font-medium max-w-[120px] truncate" title={user?.email || displayName}>
+              <span className="text-slate-300 font-medium max-w-[140px] truncate" title={user?.email || displayName}>
                 {displayName}
               </span>
               {isGuest && (

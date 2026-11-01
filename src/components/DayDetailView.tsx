@@ -29,6 +29,7 @@ import {
 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 import { hasSpanishParking, hasSpanishNotes } from '../i18n/translations';
+import { WeatherWidget } from './WeatherWidget';
 
 interface DayDetailViewProps {
   day: RouteDay;
@@ -234,6 +235,9 @@ export const DayDetailView: React.FC<DayDetailViewProps> = ({ day, onSelectPoi }
           ))}
         </div>
       </div>
+
+      {/* Weather Forecast & Trip Preparation Advice */}
+      <WeatherWidget day={day} />
 
       {/* Stop-to-Stop Distance & Driving Time Breakdown */}
       {day.legs && day.legs.length > 0 && (

@@ -18,6 +18,11 @@ import {
   hasSpanishParking,
   hasSpanishNotes,
 } from '../i18n/translations';
+import {
+  getSupabaseClient,
+  isSupabaseConfigured,
+  syncRuntimeConfig,
+} from './supabaseClient';
 
 export interface TripSettings {
   fuelPricePerLiter: number;
@@ -43,6 +48,7 @@ export interface ChecklistDoc {
 const EXPENSES_STORAGE_KEY = 'galicia_trip_custom_expenses_v1';
 const SETTINGS_STORAGE_KEY = 'galicia_trip_settings_v1';
 const CHECKLIST_STORAGE_KEY = 'galicia_trip_checklist_v2';
+const APARTMENTS_STORAGE_KEY = 'galicia_trip_user_apartments_v1';
 
 // PostgreSQL helper function (active when running on Hostinger VPS / Coolify)
 export async function sendToPostgres(url: string, method: string = 'GET', body?: any) {
@@ -57,6 +63,235 @@ export async function sendToPostgres(url: string, method: string = 'GET', body?:
   } catch {
     return null;
   }
+}
+
+// =====================================================================
+// Row Mappers: Convert Supabase (snake_case) or PostgreSQL to Frontend
+// =====================================================================
+export function mapDbRowToApartment(r: any): UserApartment {
+  const dayNum = Number(r.day_number ?? r.dayNumber) || 1;
+  const nameEs = r.name_es || r.name || '';
+  const nameFr = r.name_fr || r.name || '';
+  const parkingEs = r.parking_es || r.parking || '';
+  const parkingFr = r.parking_fr || (r.parking ? translateApartmentField(r.parking, 'fr') : '');
+  const distanceEs = r.distance_to_center_es || r.distance_to_center || r.distanceToCenter || '';
+  const distanceFr = r.distance_to_center_fr || (distanceEs ? translateApartmentField(distanceEs, 'fr') : '');
+  const policyEs = r.cancellation_policy_es || r.cancellation_policy || r.cancellationPolicy || undefined;
+  const policyFr = r.cancellation_policy_fr || (policyEs ? translateApartmentField(policyEs, 'fr') : undefined);
+  const notesEs = r.notes_es || r.notes || '';
+  const notesFr = r.notes_fr || (r.notes ? translateApartmentField(r.notes, 'fr') : '');
+
+  return {
+    id: r.id || `apt-day-${dayNum}`,
+    dayNumber: dayNum,
+    nightDate: r.night_date || r.nightDate || '',
+    city: r.city || '',
+    name: r.name || '',
+    name_es: nameEs,
+    name_fr: nameFr,
+    address: r.address || '',
+    price: Number(r.price) || 0,
+    checkInTime: r.check_in_time || r.checkInTime || '15:00',
+    checkOutTime: r.check_out_time || r.checkOutTime || '11:00',
+    freeCancellation: r.free_cancellation !== undefined
+      ? Boolean(r.free_cancellation)
+      : (r.freeCancellation !== undefined ? Boolean(r.freeCancellation) : true),
+    cancellationPolicy: r.cancellation_policy || r.cancellationPolicy || undefined,
+    cancellationPolicy_es: policyEs,
+    cancellationPolicy_fr: policyFr,
+    parking: r.parking || '',
+    parking_es: parkingEs,
+    parking_fr: parkingFr,
+    distanceToCenter: r.distance_to_center || r.distanceToCenter || '',
+    distanceToCenter_es: distanceEs,
+    distanceToCenter_fr: distanceFr,
+    bathrooms: Number(r.bathrooms) || 1,
+    notes: r.notes || '',
+    notes_es: notesEs,
+    notes_fr: notesFr,
+    isSelected: r.isSelected !== undefined ? Boolean(r.isSelected) : true,
+    createdAt: r.created_at || r.createdAt,
+    updatedAt: r.updated_at || r.updatedAt,
+  };
+}
+
+export function mapDbRowToChecklist(r: any): ChecklistDoc {
+  const titleEs = r.title_es || r.title || '';
+  const titleFr = r.title_fr || (titleEs ? translateChecklistTitle(titleEs, 'fr') : '');
+  const targetCouple = (r.target_couple || r.targetCouple || 'general') as ChecklistCouple;
+  return {
+    id: r.id,
+    title: r.title || '',
+    title_es: titleEs,
+    title_fr: titleFr,
+    completed: Boolean(r.completed),
+    category: r.category || 'general',
+    targetCouple,
+    updatedAt: r.updated_at || r.updatedAt,
+  };
+}
+
+export function mapDbRowToExpense(r: any): CustomExpense {
+  const titleEs = r.title_es || r.title || '';
+  const titleFr = r.title_fr || (titleEs ? translateExpenseTitle(titleEs, 'fr') : '');
+  const notesEs = r.notes_es || r.notes || undefined;
+  const notesFr = r.notes_fr || (r.notes ? translateExpenseNotes(r.notes, 'fr') : undefined);
+  const targetCouple = r.target_couple || r.targetCouple || 'shared';
+  const assignedTo: 'both' | 'ByL' | 'AyM' =
+    targetCouple === 'ByL' ? 'ByL' : (targetCouple === 'AyM' ? 'AyM' : 'both');
+
+  return {
+    id: r.id,
+    title: r.title || '',
+    title_es: titleEs,
+    title_fr: titleFr,
+    category: r.category || 'other',
+    amount: Number(r.amount) || 0,
+    isPerPerson: Boolean(r.is_per_person || r.isPerPerson),
+    assignedTo: (r.assignedTo as any) || assignedTo,
+    enabled: r.enabled !== undefined ? Boolean(r.enabled) : true,
+    notes: r.notes || undefined,
+    notes_es: notesEs,
+    notes_fr: notesFr,
+  };
+}
+
+export function mapDbRowToSettings(r: any): TripSettings {
+  return {
+    fuelPricePerLiter: Number(r.fuel_price_per_liter || r.fuelPricePerLiter) || DEFAULT_TRIP_SETTINGS.fuelPricePerLiter,
+    carConsumption: Number(r.car_consumption || r.carConsumption) || DEFAULT_TRIP_SETTINGS.carConsumption,
+    foodDailyBudgetPerPax: Number(r.food_daily_budget_per_pax || r.foodDailyBudgetPerPax) || DEFAULT_TRIP_SETTINGS.foodDailyBudgetPerPax,
+    totalPax: Number(r.total_pax || r.totalPax) || 4,
+    updatedAt: r.updated_at || r.updatedAt,
+  };
+}
+
+// =====================================================================
+// Direct Supabase & PostgreSQL Query Helpers
+// =====================================================================
+export async function fetchApartmentsFromSupabase(): Promise<UserApartment[] | null> {
+  const client = getSupabaseClient();
+  if (client) {
+    try {
+      const { data, error } = await client
+        .from('apartments')
+        .select('*')
+        .order('day_number', { ascending: true });
+      if (!error && Array.isArray(data) && data.length > 0) {
+        return data.map(mapDbRowToApartment);
+      }
+    } catch (e) {
+      console.warn('Supabase client select apartments error:', e);
+    }
+  }
+
+  try {
+    const res = await fetch('/api/db/apartments');
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data) && data.length > 0) {
+        return data.map(mapDbRowToApartment);
+      }
+    }
+  } catch {
+    // fallback
+  }
+
+  return null;
+}
+
+export async function fetchChecklistFromSupabase(): Promise<ChecklistDoc[] | null> {
+  const client = getSupabaseClient();
+  if (client) {
+    try {
+      const { data, error } = await client
+        .from('checklist_items')
+        .select('*')
+        .order('order_index', { ascending: true });
+      if (!error && Array.isArray(data) && data.length > 0) {
+        return data.map(mapDbRowToChecklist);
+      }
+    } catch (e) {
+      console.warn('Supabase client select checklist error:', e);
+    }
+  }
+
+  try {
+    const res = await fetch('/api/db/checklist');
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data) && data.length > 0) {
+        return data.map(mapDbRowToChecklist);
+      }
+    }
+  } catch {
+    // fallback
+  }
+
+  return null;
+}
+
+export async function fetchExpensesFromSupabase(): Promise<CustomExpense[] | null> {
+  const client = getSupabaseClient();
+  if (client) {
+    try {
+      const { data, error } = await client
+        .from('custom_expenses')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (!error && Array.isArray(data) && data.length > 0) {
+        return data.map(mapDbRowToExpense);
+      }
+    } catch (e) {
+      console.warn('Supabase client select expenses error:', e);
+    }
+  }
+
+  try {
+    const res = await fetch('/api/db/expenses');
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data) && data.length > 0) {
+        return data.map(mapDbRowToExpense);
+      }
+    }
+  } catch {
+    // fallback
+  }
+
+  return null;
+}
+
+export async function fetchSettingsFromSupabase(): Promise<TripSettings | null> {
+  const client = getSupabaseClient();
+  if (client) {
+    try {
+      const { data, error } = await client
+        .from('trip_settings')
+        .select('*')
+        .eq('id', 'default')
+        .maybeSingle();
+      if (!error && data) {
+        return mapDbRowToSettings(data);
+      }
+    } catch (e) {
+      console.warn('Supabase client select settings error:', e);
+    }
+  }
+
+  try {
+    const res = await fetch('/api/db/settings');
+    if (res.ok) {
+      const data = await res.json();
+      if (data && (data.fuelPricePerLiter || data.fuel_price_per_liter)) {
+        return mapDbRowToSettings(data);
+      }
+    }
+  } catch {
+    // fallback
+  }
+
+  return null;
 }
 
 export const DEFAULT_CUSTOM_EXPENSES: CustomExpense[] = [];
@@ -197,12 +432,11 @@ export const DEFAULT_CHECKLIST: ChecklistDoc[] = [
 ];
 
 /**
- * Sync custom expenses with real-time updates and fallback to localStorage
+ * Sync custom expenses with real-time Supabase / PostgreSQL updates and fallback
  */
 export function subscribeToExpenses(
   onUpdate: (expenses: CustomExpense[], source: 'cloud' | 'local') => void
 ): () => void {
-  // First, provide local cached version immediately (defaults to empty)
   let cached: CustomExpense[] = [];
   try {
     const local = localStorage.getItem(EXPENSES_STORAGE_KEY);
@@ -214,81 +448,152 @@ export function subscribeToExpenses(
   }
   onUpdate(cached, 'local');
 
-  const expensesCol = collection(db, 'expenses');
+  let isSubscribed = true;
+  let supabaseChannel: any = null;
 
-  const unsubscribe = onSnapshot(
-    expensesCol,
-    (snapshot) => {
-      const cloudExpenses: CustomExpense[] = [];
-      snapshot.forEach((docSnap) => {
-        const data = docSnap.data();
-        const titleEs = data.title_es || data.title || '';
-        const titleFr = data.title_fr || (titleEs ? translateExpenseTitle(titleEs, 'fr') : '');
-        const notesEs = data.notes_es || data.notes || undefined;
-        const notesFr = data.notes_fr || (data.notes ? translateExpenseNotes(data.notes, 'fr') : undefined);
-
-        cloudExpenses.push({
-          id: docSnap.id,
-          title: data.title ?? '',
-          title_es: titleEs,
-          title_fr: titleFr,
-          category: data.category ?? 'other',
-          amount: Number(data.amount) || 0,
-          isPerPerson: Boolean(data.isPerPerson),
-          assignedTo: (data.assignedTo as 'both' | 'ByL' | 'AyM') || 'both',
-          enabled: Boolean(data.enabled),
-          notes: data.notes || undefined,
-          notes_es: notesEs,
-          notes_fr: notesFr,
-        });
-
-        // Auto-persist French translations in Firestore DB document if missing
-        if ((!data.title_fr && titleFr) || (!data.notes_fr && notesFr)) {
-          updateDoc(doc(db, 'expenses', docSnap.id), {
-            title_es: titleEs,
-            title_fr: titleFr,
-            notes_es: notesEs || '',
-            notes_fr: notesFr || '',
-            assignedTo: data.assignedTo || 'both',
-          }).catch(() => {});
-        }
-      });
-
-      // Update local storage cache
+  // Supabase / PostgreSQL primary fetch and sync
+  const syncSupabase = async () => {
+    await syncRuntimeConfig();
+    if (!isSubscribed) return;
+    const dbExpenses = await fetchExpensesFromSupabase();
+    if (dbExpenses !== null && isSubscribed) {
       try {
-        localStorage.setItem(EXPENSES_STORAGE_KEY, JSON.stringify(cloudExpenses));
-      } catch {
-        // ignore
-      }
-
-      onUpdate(cloudExpenses, 'cloud');
-    },
-    (error) => {
-      console.warn('Firestore onSnapshot expenses error:', error);
-      try {
-        handleFirestoreError(error, OperationType.LIST, 'expenses');
-      } catch (err) {
-        console.warn('Caught and fallback to local cache:', err);
-      }
+        localStorage.setItem(EXPENSES_STORAGE_KEY, JSON.stringify(dbExpenses));
+      } catch {}
+      onUpdate(dbExpenses, 'cloud');
     }
-  );
+  };
 
-  return unsubscribe;
+  syncSupabase();
+
+  // Supabase Realtime Channel
+  const client = getSupabaseClient();
+  if (client) {
+    try {
+      supabaseChannel = client
+        .channel(`realtime:expenses:${Date.now()}`)
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'custom_expenses' },
+          async () => {
+            const fresh = await fetchExpensesFromSupabase();
+            if (fresh !== null && isSubscribed) {
+              try {
+                localStorage.setItem(EXPENSES_STORAGE_KEY, JSON.stringify(fresh));
+              } catch {}
+              onUpdate(fresh, 'cloud');
+            }
+          }
+        )
+        .subscribe();
+    } catch (e) {
+      console.warn('Supabase realtime expenses error:', e);
+    }
+  }
+
+  // Periodic poll to ensure live updates across instances
+  const pollInterval = setInterval(() => {
+    if (isSubscribed) syncSupabase();
+  }, 15000);
+
+  // Firestore mirror / fallback
+  let firestoreUnsub: (() => void) | null = null;
+  try {
+    const expensesCol = collection(db, 'expenses');
+    firestoreUnsub = onSnapshot(
+      expensesCol,
+      (snapshot) => {
+        if (!snapshot.empty && isSubscribed) {
+          const cloudExpenses: CustomExpense[] = [];
+          snapshot.forEach((docSnap) => {
+            const data = docSnap.data();
+            const titleEs = data.title_es || data.title || '';
+            const titleFr = data.title_fr || (titleEs ? translateExpenseTitle(titleEs, 'fr') : '');
+            const notesEs = data.notes_es || data.notes || undefined;
+            const notesFr = data.notes_fr || (data.notes ? translateExpenseNotes(data.notes, 'fr') : undefined);
+
+            cloudExpenses.push({
+              id: docSnap.id,
+              title: data.title ?? '',
+              title_es: titleEs,
+              title_fr: titleFr,
+              category: data.category ?? 'other',
+              amount: Number(data.amount) || 0,
+              isPerPerson: Boolean(data.isPerPerson),
+              assignedTo: (data.assignedTo as 'both' | 'ByL' | 'AyM') || 'both',
+              enabled: Boolean(data.enabled),
+              notes: data.notes || undefined,
+              notes_es: notesEs,
+              notes_fr: notesFr,
+            });
+          });
+          onUpdate(cloudExpenses, 'cloud');
+        }
+      },
+      (error) => {
+        console.warn('Firestore onSnapshot expenses notice:', error);
+      }
+    );
+  } catch {}
+
+  return () => {
+    isSubscribed = false;
+    clearInterval(pollInterval);
+    if (supabaseChannel) {
+      try {
+        supabaseChannel.unsubscribe();
+      } catch {}
+    }
+    if (firestoreUnsub) {
+      firestoreUnsub();
+    }
+  };
 }
 
 export async function saveExpenseToCloud(expense: CustomExpense): Promise<void> {
-  const path = `expenses/${expense.id}`;
-  // Sync to PostgreSQL (Hostinger VPS / Coolify)
+  const payer = (expense as any).payer || (expense.assignedTo === 'ByL' ? 'ByL' : (expense.assignedTo === 'AyM' ? 'AyM' : 'ByL'));
+  const targetCouple = (expense as any).targetCouple || (expense.assignedTo === 'ByL' ? 'ByL' : (expense.assignedTo === 'AyM' ? 'AyM' : 'shared'));
+
+  // 1. Direct Supabase Upsert
+  const client = getSupabaseClient();
+  if (client) {
+    try {
+      await client.from('custom_expenses').upsert({
+        id: expense.id,
+        title: expense.title,
+        amount: Number(expense.amount) || 0,
+        payer,
+        target_couple: targetCouple,
+        category: expense.category || 'general',
+        notes: expense.notes || '',
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'id' });
+    } catch (e) {
+      console.warn('Supabase upsert expense error:', e);
+    }
+  }
+
+  // 2. Sync to PostgreSQL REST endpoint
   sendToPostgres('/api/db/expenses', 'POST', {
     id: expense.id,
     title: expense.title,
     amount: expense.amount,
-    payer: (expense as any).payer || (expense.assignedTo === 'ByL' ? 'ByL' : (expense.assignedTo === 'AyM' ? 'AyM' : 'ByL')),
-    targetCouple: (expense as any).targetCouple || (expense.assignedTo === 'ByL' ? 'ByL' : (expense.assignedTo === 'AyM' ? 'AyM' : 'shared')),
+    payer,
+    targetCouple,
     category: expense.category || 'general',
     notes: expense.notes || '',
   }).catch(() => {});
 
+  // 3. LocalStorage cache
+  try {
+    const local = localStorage.getItem(EXPENSES_STORAGE_KEY);
+    let list: CustomExpense[] = local ? JSON.parse(local) : [];
+    list = list.filter((e) => e.id !== expense.id);
+    list.push(expense);
+    localStorage.setItem(EXPENSES_STORAGE_KEY, JSON.stringify(list));
+  } catch {}
+
+  // 4. Firestore mirror (safe fallback)
   try {
     const cleanData = {
       id: expense.id,
@@ -308,50 +613,94 @@ export async function saveExpenseToCloud(expense: CustomExpense): Promise<void> 
     };
     await setDoc(doc(db, 'expenses', expense.id), cleanData);
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, path);
+    console.warn('Firestore expense write notice:', error);
   }
 }
 
 export async function toggleExpenseInCloud(id: string, enabled: boolean): Promise<void> {
-  const path = `expenses/${id}`;
+  const client = getSupabaseClient();
+  if (client) {
+    try {
+      await client.from('custom_expenses').update({
+        notes: undefined, // leave notes untouched
+        updated_at: new Date().toISOString(),
+      }).eq('id', id);
+    } catch (e) {
+      console.warn('Supabase toggle expense error:', e);
+    }
+  }
+
+  try {
+    const local = localStorage.getItem(EXPENSES_STORAGE_KEY);
+    if (local) {
+      const list: CustomExpense[] = JSON.parse(local);
+      const updated = list.map((e) => (e.id === id ? { ...e, enabled } : e));
+      localStorage.setItem(EXPENSES_STORAGE_KEY, JSON.stringify(updated));
+    }
+  } catch {}
+
   try {
     await updateDoc(doc(db, 'expenses', id), {
       enabled,
       updatedAt: new Date().toISOString(),
     });
   } catch (error) {
-    handleFirestoreError(error, OperationType.UPDATE, path);
+    console.warn('Firestore toggle expense notice:', error);
   }
 }
 
 export async function deleteExpenseFromCloud(id: string): Promise<void> {
-  const path = `expenses/${id}`;
+  const client = getSupabaseClient();
+  if (client) {
+    try {
+      await client.from('custom_expenses').delete().eq('id', id);
+    } catch (e) {
+      console.warn('Supabase delete expense error:', e);
+    }
+  }
+
   sendToPostgres(`/api/db/expenses/${id}`, 'DELETE').catch(() => {});
+
+  try {
+    const local = localStorage.getItem(EXPENSES_STORAGE_KEY);
+    if (local) {
+      const list: CustomExpense[] = JSON.parse(local);
+      localStorage.setItem(EXPENSES_STORAGE_KEY, JSON.stringify(list.filter((e) => e.id !== id)));
+    }
+  } catch {}
+
   try {
     await deleteDoc(doc(db, 'expenses', id));
   } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, path);
+    console.warn('Firestore delete expense notice:', error);
   }
 }
 
 export async function clearAllExpensesFromCloud(): Promise<void> {
-  const path = 'expenses';
+  const client = getSupabaseClient();
+  if (client) {
+    try {
+      await client.from('custom_expenses').delete().neq('id', '');
+    } catch (e) {
+      console.warn('Supabase clear expenses error:', e);
+    }
+  }
+
   try {
     const snap = await getDocs(collection(db, 'expenses'));
     const deletes = snap.docs.map((docSnap) => deleteDoc(doc(db, 'expenses', docSnap.id)));
     await Promise.all(deletes);
   } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, path);
+    console.warn('Firestore clear expenses notice:', error);
   }
+
   try {
     localStorage.removeItem(EXPENSES_STORAGE_KEY);
-  } catch {
-    // ignore
-  }
+  } catch {}
 }
 
 /**
- * Sync Trip Calculation Settings (fuel, consumption, food budget)
+ * Sync Trip Calculation Settings (fuel, consumption, food budget) with Supabase / Postgres
  */
 let currentCachedSettings: TripSettings = DEFAULT_TRIP_SETTINGS;
 try {
@@ -359,63 +708,101 @@ try {
   if (local) {
     currentCachedSettings = { ...DEFAULT_TRIP_SETTINGS, ...JSON.parse(local) };
   }
-} catch {
-  // ignore
-}
+} catch {}
 
 export function subscribeToSettings(
   onUpdate: (settings: TripSettings, source: 'cloud' | 'local') => void
 ): () => void {
   onUpdate(currentCachedSettings, 'local');
 
-  const settingsDocRef = doc(db, 'trip_settings', 'default');
+  let isSubscribed = true;
+  let supabaseChannel: any = null;
 
-  const unsubscribe = onSnapshot(
-    settingsDocRef,
-    async (docSnap) => {
-      if (!docSnap.exists()) {
-        try {
-          await setDoc(settingsDocRef, {
-            ...currentCachedSettings,
-            id: 'default',
-            updatedAt: new Date().toISOString(),
-          });
-        } catch {
-          // ignore
-        }
-        return;
-      }
-
-      const data = docSnap.data();
-      const settings: TripSettings = {
-        fuelPricePerLiter: Number(data.fuelPricePerLiter) || DEFAULT_TRIP_SETTINGS.fuelPricePerLiter,
-        carConsumption: Number(data.carConsumption) || DEFAULT_TRIP_SETTINGS.carConsumption,
-        foodDailyBudgetPerPax: Number(data.foodDailyBudgetPerPax) || DEFAULT_TRIP_SETTINGS.foodDailyBudgetPerPax,
-        totalPax: Number(data.totalPax) || 4,
-        updatedAt: data.updatedAt,
-      };
-
-      currentCachedSettings = settings;
-
+  const syncSupabase = async () => {
+    await syncRuntimeConfig();
+    if (!isSubscribed) return;
+    const dbSettings = await fetchSettingsFromSupabase();
+    if (dbSettings && isSubscribed) {
+      currentCachedSettings = dbSettings;
       try {
-        localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
-      } catch {
-        // ignore
-      }
-
-      onUpdate(settings, 'cloud');
-    },
-    (error) => {
-      console.warn('Firestore onSnapshot settings error:', error);
-      try {
-        handleFirestoreError(error, OperationType.GET, 'trip_settings/default');
-      } catch (err) {
-        console.warn('Caught and fallback to local settings:', err);
-      }
+        localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(dbSettings));
+      } catch {}
+      onUpdate(dbSettings, 'cloud');
     }
-  );
+  };
 
-  return unsubscribe;
+  syncSupabase();
+
+  const client = getSupabaseClient();
+  if (client) {
+    try {
+      supabaseChannel = client
+        .channel(`realtime:settings:${Date.now()}`)
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'trip_settings' },
+          async () => {
+            const fresh = await fetchSettingsFromSupabase();
+            if (fresh && isSubscribed) {
+              currentCachedSettings = fresh;
+              try {
+                localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(fresh));
+              } catch {}
+              onUpdate(fresh, 'cloud');
+            }
+          }
+        )
+        .subscribe();
+    } catch (e) {
+      console.warn('Supabase realtime settings error:', e);
+    }
+  }
+
+  const pollInterval = setInterval(() => {
+    if (isSubscribed) syncSupabase();
+  }, 15000);
+
+  // Firestore mirror
+  let firestoreUnsub: (() => void) | null = null;
+  try {
+    const settingsDocRef = doc(db, 'trip_settings', 'default');
+    firestoreUnsub = onSnapshot(
+      settingsDocRef,
+      (docSnap) => {
+        if (docSnap.exists() && isSubscribed) {
+          const data = docSnap.data();
+          const settings: TripSettings = {
+            fuelPricePerLiter: Number(data.fuelPricePerLiter) || DEFAULT_TRIP_SETTINGS.fuelPricePerLiter,
+            carConsumption: Number(data.carConsumption) || DEFAULT_TRIP_SETTINGS.carConsumption,
+            foodDailyBudgetPerPax: Number(data.foodDailyBudgetPerPax) || DEFAULT_TRIP_SETTINGS.foodDailyBudgetPerPax,
+            totalPax: Number(data.totalPax) || 4,
+            updatedAt: data.updatedAt,
+          };
+          currentCachedSettings = settings;
+          try {
+            localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+          } catch {}
+          onUpdate(settings, 'cloud');
+        }
+      },
+      (error) => {
+        console.warn('Firestore onSnapshot settings notice:', error);
+      }
+    );
+  } catch {}
+
+  return () => {
+    isSubscribed = false;
+    clearInterval(pollInterval);
+    if (supabaseChannel) {
+      try {
+        supabaseChannel.unsubscribe();
+      } catch {}
+    }
+    if (firestoreUnsub) {
+      firestoreUnsub();
+    }
+  };
 }
 
 export async function saveSettingsToCloud(settings: Partial<TripSettings>): Promise<void> {
@@ -428,11 +815,31 @@ export async function saveSettingsToCloud(settings: Partial<TripSettings>): Prom
 
   try {
     localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(merged));
-  } catch {
-    // ignore
+  } catch {}
+
+  const client = getSupabaseClient();
+  if (client) {
+    try {
+      await client.from('trip_settings').upsert({
+        id: 'default',
+        fuel_price_per_liter: merged.fuelPricePerLiter,
+        car_consumption: merged.carConsumption,
+        food_daily_budget_per_pax: merged.foodDailyBudgetPerPax,
+        total_pax: merged.totalPax,
+        updated_at: merged.updatedAt,
+      }, { onConflict: 'id' });
+    } catch (e) {
+      console.warn('Supabase upsert settings error:', e);
+    }
   }
 
-  const path = 'trip_settings/default';
+  sendToPostgres('/api/db/settings', 'POST', {
+    fuelPricePerLiter: merged.fuelPricePerLiter,
+    carConsumption: merged.carConsumption,
+    foodDailyBudgetPerPax: merged.foodDailyBudgetPerPax,
+    totalPax: merged.totalPax,
+  }).catch(() => {});
+
   try {
     await setDoc(
       doc(db, 'trip_settings', 'default'),
@@ -447,12 +854,12 @@ export async function saveSettingsToCloud(settings: Partial<TripSettings>): Prom
       { merge: true }
     );
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, path);
+    console.warn('Firestore settings write notice:', error);
   }
 }
 
 /**
- * Sync Checklist
+ * Sync Checklist with Supabase table checklist_items as primary source of truth
  */
 export function subscribeToChecklist(
   onUpdate: (items: ChecklistDoc[], source: 'cloud' | 'local') => void
@@ -463,88 +870,135 @@ export function subscribeToChecklist(
     if (local) {
       cached = JSON.parse(local);
     }
-  } catch {
-    // ignore
-  }
+  } catch {}
   onUpdate(cached, 'local');
 
-  const checklistCol = collection(db, 'checklist');
+  let isSubscribed = true;
+  let supabaseChannel: any = null;
 
-  const unsubscribe = onSnapshot(
-    checklistCol,
-    async (snapshot) => {
-      if (snapshot.empty) {
-        try {
-          for (const item of cached) {
-            await setDoc(doc(db, 'checklist', item.id), {
-              ...item,
-              updatedAt: new Date().toISOString(),
-            });
-          }
-        } catch {
-          // ignore
-        }
-        return;
-      }
-
-      const itemsMap = new Map<string, ChecklistDoc>();
-      snapshot.forEach((snap) => {
-        const d = snap.data();
-        const titleEs = d.title_es || d.title || '';
-        const titleFr = d.title_fr || (titleEs ? translateChecklistTitle(titleEs, 'fr') : '');
-
-        itemsMap.set(snap.id, {
-          id: snap.id,
-          title: d.title || '',
-          title_es: titleEs,
-          title_fr: titleFr,
-          completed: Boolean(d.completed),
-          category: d.category || undefined,
-          targetCouple: (d.targetCouple as ChecklistCouple) || 'general',
-          updatedAt: d.updatedAt,
-        });
-
-        // Persist French title directly to Firestore DB document if missing
-        if (!d.title_fr && titleFr) {
-          updateDoc(doc(db, 'checklist', snap.id), {
-            title_es: titleEs,
-            title_fr: titleFr,
-            targetCouple: d.targetCouple || 'general',
-          }).catch(() => {});
-        }
-      });
-
-      const items = Array.from(itemsMap.values());
+  const syncSupabase = async () => {
+    await syncRuntimeConfig();
+    if (!isSubscribed) return;
+    const dbItems = await fetchChecklistFromSupabase();
+    if (dbItems && dbItems.length > 0 && isSubscribed) {
       try {
-        localStorage.setItem(CHECKLIST_STORAGE_KEY, JSON.stringify(items));
-      } catch {
-        // ignore
-      }
-
-      onUpdate(items, 'cloud');
-    },
-    (error) => {
-      console.warn('Firestore checklist error:', error);
-      try {
-        handleFirestoreError(error, OperationType.LIST, 'checklist');
-      } catch (err) {
-        console.warn('Caught and fallback to local checklist:', err);
-      }
+        localStorage.setItem(CHECKLIST_STORAGE_KEY, JSON.stringify(dbItems));
+      } catch {}
+      onUpdate(dbItems, 'cloud');
     }
-  );
+  };
 
-  return unsubscribe;
+  syncSupabase();
+
+  const client = getSupabaseClient();
+  if (client) {
+    try {
+      supabaseChannel = client
+        .channel(`realtime:checklist:${Date.now()}`)
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'checklist_items' },
+          async () => {
+            const fresh = await fetchChecklistFromSupabase();
+            if (fresh && fresh.length > 0 && isSubscribed) {
+              try {
+                localStorage.setItem(CHECKLIST_STORAGE_KEY, JSON.stringify(fresh));
+              } catch {}
+              onUpdate(fresh, 'cloud');
+            }
+          }
+        )
+        .subscribe();
+    } catch (e) {
+      console.warn('Supabase realtime checklist error:', e);
+    }
+  }
+
+  const pollInterval = setInterval(() => {
+    if (isSubscribed) syncSupabase();
+  }, 15000);
+
+  // Firestore mirror / fallback
+  let firestoreUnsub: (() => void) | null = null;
+  try {
+    const checklistCol = collection(db, 'checklist');
+    firestoreUnsub = onSnapshot(
+      checklistCol,
+      (snapshot) => {
+        if (!snapshot.empty && isSubscribed) {
+          const itemsMap = new Map<string, ChecklistDoc>();
+          snapshot.forEach((snap) => {
+            const d = snap.data();
+            const titleEs = d.title_es || d.title || '';
+            const titleFr = d.title_fr || (titleEs ? translateChecklistTitle(titleEs, 'fr') : '');
+
+            itemsMap.set(snap.id, {
+              id: snap.id,
+              title: d.title || '',
+              title_es: titleEs,
+              title_fr: titleFr,
+              completed: Boolean(d.completed),
+              category: d.category || undefined,
+              targetCouple: (d.targetCouple as ChecklistCouple) || 'general',
+              updatedAt: d.updatedAt,
+            });
+          });
+
+          const items = Array.from(itemsMap.values());
+          onUpdate(items, 'cloud');
+        }
+      },
+      (error) => {
+        console.warn('Firestore checklist notice:', error);
+      }
+    );
+  } catch {}
+
+  return () => {
+    isSubscribed = false;
+    clearInterval(pollInterval);
+    if (supabaseChannel) {
+      try {
+        supabaseChannel.unsubscribe();
+      } catch {}
+    }
+    if (firestoreUnsub) {
+      firestoreUnsub();
+    }
+  };
 }
 
 export async function toggleChecklistItemInCloud(id: string, completed: boolean): Promise<void> {
-  const path = `checklist/${id}`;
+  const client = getSupabaseClient();
+  if (client) {
+    try {
+      await client.from('checklist_items').update({
+        completed,
+        updated_at: new Date().toISOString(),
+      }).eq('id', id);
+    } catch (e) {
+      console.warn('Supabase toggle checklist error:', e);
+    }
+  }
+
+  sendToPostgres(`/api/db/checklist/${id}`, 'PATCH', { completed }).catch(() => {});
+
+  try {
+    const local = localStorage.getItem(CHECKLIST_STORAGE_KEY);
+    if (local) {
+      const list: ChecklistDoc[] = JSON.parse(local);
+      const updated = list.map((item) => (item.id === id ? { ...item, completed } : item));
+      localStorage.setItem(CHECKLIST_STORAGE_KEY, JSON.stringify(updated));
+    }
+  } catch {}
+
   try {
     await updateDoc(doc(db, 'checklist', id), {
       completed,
       updatedAt: new Date().toISOString(),
     });
   } catch (error) {
-    handleFirestoreError(error, OperationType.UPDATE, path);
+    console.warn('Firestore checklist toggle notice:', error);
   }
 }
 
@@ -556,7 +1010,6 @@ export async function addChecklistItemToCloud(
   const randomSuffix = Math.random().toString(36).substring(2, 7);
   const prefix = targetCouple === 'ByL' ? 'byl' : targetCouple === 'AyM' ? 'aym' : 'gen';
   const id = `chk-${prefix}-${Date.now()}-${randomSuffix}`;
-  const path = `checklist/${id}`;
   const trimmed = title.trim();
   const newItem: ChecklistDoc = {
     id,
@@ -567,28 +1020,81 @@ export async function addChecklistItemToCloud(
     targetCouple,
     updatedAt: new Date().toISOString(),
   };
+
+  const client = getSupabaseClient();
+  if (client) {
+    try {
+      await client.from('checklist_items').insert({
+        id,
+        title: trimmed,
+        title_es: newItem.title_es,
+        title_fr: newItem.title_fr,
+        completed: false,
+        category: 'general',
+        target_couple: targetCouple,
+        order_index: Date.now() % 100000,
+        updated_at: new Date().toISOString(),
+      });
+    } catch (e) {
+      console.warn('Supabase add checklist error:', e);
+    }
+  }
+
+  sendToPostgres('/api/db/checklist', 'POST', {
+    id,
+    title: trimmed,
+    title_es: newItem.title_es,
+    title_fr: newItem.title_fr,
+    completed: false,
+    category: 'general',
+    targetCouple,
+  }).catch(() => {});
+
+  try {
+    const local = localStorage.getItem(CHECKLIST_STORAGE_KEY);
+    const list: ChecklistDoc[] = local ? JSON.parse(local) : [];
+    list.push(newItem);
+    localStorage.setItem(CHECKLIST_STORAGE_KEY, JSON.stringify(list));
+  } catch {}
+
   try {
     await setDoc(doc(db, 'checklist', id), newItem);
-    return newItem;
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, path);
-    return newItem;
+    console.warn('Firestore checklist write notice:', error);
   }
+
+  return newItem;
 }
 
 export async function deleteChecklistItemFromCloud(id: string): Promise<void> {
-  const path = `checklist/${id}`;
+  const client = getSupabaseClient();
+  if (client) {
+    try {
+      await client.from('checklist_items').delete().eq('id', id);
+    } catch (e) {
+      console.warn('Supabase delete checklist error:', e);
+    }
+  }
+
+  sendToPostgres(`/api/db/checklist/${id}`, 'DELETE').catch(() => {});
+
+  try {
+    const local = localStorage.getItem(CHECKLIST_STORAGE_KEY);
+    if (local) {
+      const list: ChecklistDoc[] = JSON.parse(local);
+      localStorage.setItem(CHECKLIST_STORAGE_KEY, JSON.stringify(list.filter((i) => i.id !== id)));
+    }
+  } catch {}
+
   try {
     await deleteDoc(doc(db, 'checklist', id));
   } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, path);
+    console.warn('Firestore checklist delete notice:', error);
   }
 }
 
-const APARTMENTS_STORAGE_KEY = 'galicia_trip_user_apartments_v1';
-
 /**
- * Subscribe to user-defined apartments with real-time Firestore sync & localStorage fallback
+ * Subscribe to 9 circular route apartments from Supabase table apartments as primary source of truth
  */
 export function subscribeToApartments(
   onUpdate: (apartments: UserApartment[], source: 'cloud' | 'local') => void
@@ -599,110 +1105,178 @@ export function subscribeToApartments(
     if (local) {
       cached = JSON.parse(local);
     }
-  } catch {
-    // ignore
-  }
+  } catch {}
   onUpdate(cached, 'local');
 
-  const apartmentsCol = collection(db, 'apartments');
+  let isSubscribed = true;
+  let supabaseChannel: any = null;
 
-  const unsubscribe = onSnapshot(
-    apartmentsCol,
-    (snapshot) => {
-      const items: UserApartment[] = [];
-      snapshot.forEach((snap) => {
-        const d = snap.data();
-        const nameEs = d.name_es || d.name || '';
-        const nameFr = d.name_fr || d.name || '';
-        const parkingEs = d.parking_es || d.parking || '';
-        const parkingFr = (d.parking_fr && !hasSpanishParking(d.parking_fr))
-          ? d.parking_fr
-          : (d.parking ? translateApartmentField(d.parking, 'fr') : (d.parking_fr ? translateApartmentField(d.parking_fr, 'fr') : ''));
-        const distanceEs = d.distanceToCenter_es || d.distanceToCenter || '';
-        const distanceFr = d.distanceToCenter_fr || (d.distanceToCenter ? translateApartmentField(d.distanceToCenter, 'fr') : '');
-        const policyEs = d.cancellationPolicy_es || d.cancellationPolicy || undefined;
-        const policyFr = d.cancellationPolicy_fr || (d.cancellationPolicy ? translateApartmentField(d.cancellationPolicy, 'fr') : undefined);
-        const notesEs = d.notes_es || d.notes || '';
-        const notesFr = (d.notes_fr && !hasSpanishNotes(d.notes_fr))
-          ? d.notes_fr
-          : (d.notes ? translateApartmentField(d.notes, 'fr') : (d.notes_fr ? translateApartmentField(d.notes_fr, 'fr') : ''));
-
-        items.push({
-          id: snap.id,
-          dayNumber: Number(d.dayNumber) || 1,
-          nightDate: d.nightDate || '',
-          city: d.city || '',
-          name: d.name || '',
-          name_es: nameEs,
-          name_fr: nameFr,
-          address: d.address || '',
-          price: Number(d.price) || 0,
-          checkInTime: d.checkInTime || '',
-          checkOutTime: d.checkOutTime || '',
-          freeCancellation: Boolean(d.freeCancellation),
-          cancellationPolicy: d.cancellationPolicy || undefined,
-          cancellationPolicy_es: policyEs,
-          cancellationPolicy_fr: policyFr,
-          parking: d.parking || '',
-          parking_es: parkingEs,
-          parking_fr: parkingFr,
-          distanceToCenter: d.distanceToCenter || '',
-          distanceToCenter_es: distanceEs,
-          distanceToCenter_fr: distanceFr,
-          bathrooms: Number(d.bathrooms) || 1,
-          notes: d.notes || '',
-          notes_es: notesEs,
-          notes_fr: notesFr,
-          isSelected: d.isSelected !== undefined ? Boolean(d.isSelected) : true,
-          createdAt: d.createdAt,
-          updatedAt: d.updatedAt,
-        });
-
-        // Persist French translations directly to Firestore DB document if missing or updated
-        if ((d.parking_fr !== parkingFr && parkingFr) || (d.notes_fr !== notesFr && notesFr) || (!d.distanceToCenter_fr && distanceFr) || (!d.cancellationPolicy_fr && policyFr)) {
-          updateDoc(doc(db, 'apartments', snap.id), {
-            parking_es: parkingEs,
-            parking_fr: parkingFr,
-            notes_es: notesEs,
-            notes_fr: notesFr,
-            distanceToCenter_es: distanceEs,
-            distanceToCenter_fr: distanceFr,
-            ...(policyFr ? { cancellationPolicy_es: policyEs, cancellationPolicy_fr: policyFr } : {}),
-          }).catch(() => {});
-        }
-      });
-
-      // Sort by dayNumber ascending
-      items.sort((a, b) => a.dayNumber - b.dayNumber);
-
+  const syncSupabase = async () => {
+    await syncRuntimeConfig();
+    if (!isSubscribed) return;
+    const dbApartments = await fetchApartmentsFromSupabase();
+    if (dbApartments && dbApartments.length > 0 && isSubscribed) {
       try {
-        localStorage.setItem(APARTMENTS_STORAGE_KEY, JSON.stringify(items));
-      } catch {
-        // ignore
-      }
-
-      onUpdate(items, 'cloud');
-    },
-    (error) => {
-      console.warn('Firestore apartments error:', error);
-      try {
-        handleFirestoreError(error, OperationType.LIST, 'apartments');
-      } catch (err) {
-        console.warn('Caught and fallback to local apartments cache:', err);
-      }
+        localStorage.setItem(APARTMENTS_STORAGE_KEY, JSON.stringify(dbApartments));
+      } catch {}
+      onUpdate(dbApartments, 'cloud');
     }
-  );
+  };
 
-  return unsubscribe;
+  syncSupabase();
+
+  const client = getSupabaseClient();
+  if (client) {
+    try {
+      supabaseChannel = client
+        .channel(`realtime:apartments:${Date.now()}`)
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'apartments' },
+          async () => {
+            const fresh = await fetchApartmentsFromSupabase();
+            if (fresh && fresh.length > 0 && isSubscribed) {
+              try {
+                localStorage.setItem(APARTMENTS_STORAGE_KEY, JSON.stringify(fresh));
+              } catch {}
+              onUpdate(fresh, 'cloud');
+            }
+          }
+        )
+        .subscribe();
+    } catch (e) {
+      console.warn('Supabase realtime apartments error:', e);
+    }
+  }
+
+  const pollInterval = setInterval(() => {
+    if (isSubscribed) syncSupabase();
+  }, 15000);
+
+  // Firestore mirror / fallback
+  let firestoreUnsub: (() => void) | null = null;
+  try {
+    const apartmentsCol = collection(db, 'apartments');
+    firestoreUnsub = onSnapshot(
+      apartmentsCol,
+      (snapshot) => {
+        if (!snapshot.empty && isSubscribed) {
+          const items: UserApartment[] = [];
+          snapshot.forEach((snap) => {
+            const d = snap.data();
+            const nameEs = d.name_es || d.name || '';
+            const nameFr = d.name_fr || d.name || '';
+            const parkingEs = d.parking_es || d.parking || '';
+            const parkingFr = (d.parking_fr && !hasSpanishParking(d.parking_fr))
+              ? d.parking_fr
+              : (d.parking ? translateApartmentField(d.parking, 'fr') : '');
+            const distanceEs = d.distanceToCenter_es || d.distanceToCenter || '';
+            const distanceFr = d.distanceToCenter_fr || (distanceEs ? translateApartmentField(distanceEs, 'fr') : '');
+            const policyEs = d.cancellationPolicy_es || d.cancellationPolicy || undefined;
+            const policyFr = d.cancellationPolicy_fr || (policyEs ? translateApartmentField(policyEs, 'fr') : undefined);
+            const notesEs = d.notes_es || d.notes || '';
+            const notesFr = (d.notes_fr && !hasSpanishNotes(d.notes_fr))
+              ? d.notes_fr
+              : (d.notes ? translateApartmentField(d.notes, 'fr') : '');
+
+            items.push({
+              id: snap.id,
+              dayNumber: Number(d.dayNumber) || 1,
+              nightDate: d.nightDate || '',
+              city: d.city || '',
+              name: d.name || '',
+              name_es: nameEs,
+              name_fr: nameFr,
+              address: d.address || '',
+              price: Number(d.price) || 0,
+              checkInTime: d.checkInTime || '',
+              checkOutTime: d.checkOutTime || '',
+              freeCancellation: Boolean(d.freeCancellation),
+              cancellationPolicy: d.cancellationPolicy || undefined,
+              cancellationPolicy_es: policyEs,
+              cancellationPolicy_fr: policyFr,
+              parking: d.parking || '',
+              parking_es: parkingEs,
+              parking_fr: parkingFr,
+              distanceToCenter: d.distanceToCenter || '',
+              distanceToCenter_es: distanceEs,
+              distanceToCenter_fr: distanceFr,
+              bathrooms: Number(d.bathrooms) || 1,
+              notes: d.notes || '',
+              notes_es: notesEs,
+              notes_fr: notesFr,
+              isSelected: d.isSelected !== undefined ? Boolean(d.isSelected) : true,
+              createdAt: d.createdAt,
+              updatedAt: d.updatedAt,
+            });
+          });
+
+          items.sort((a, b) => a.dayNumber - b.dayNumber);
+          onUpdate(items, 'cloud');
+        }
+      },
+      (error) => {
+        console.warn('Firestore onSnapshot apartments notice:', error);
+      }
+    );
+  } catch {}
+
+  return () => {
+    isSubscribed = false;
+    clearInterval(pollInterval);
+    if (supabaseChannel) {
+      try {
+        supabaseChannel.unsubscribe();
+      } catch {}
+    }
+    if (firestoreUnsub) {
+      firestoreUnsub();
+    }
+  };
 }
 
 export async function saveApartmentToCloud(apartment: UserApartment): Promise<void> {
-  const path = `apartments/${apartment.id}`;
-  // Sync to PostgreSQL (Hostinger VPS / Coolify)
+  const client = getSupabaseClient();
+  if (client) {
+    try {
+      await client.from('apartments').upsert({
+        id: apartment.id,
+        day_number: apartment.dayNumber,
+        night_date: apartment.nightDate || '',
+        city: apartment.city || '',
+        name: apartment.name,
+        name_es: apartment.name_es || apartment.name,
+        name_fr: apartment.name_fr || apartment.name,
+        address: apartment.address,
+        price: Number(apartment.price) || 0,
+        check_in_time: apartment.checkInTime || '15:00',
+        check_out_time: apartment.checkOutTime || '11:00',
+        free_cancellation: Boolean(apartment.freeCancellation),
+        cancellation_policy: apartment.cancellationPolicy || '',
+        parking: apartment.parking || '',
+        distance_to_center: apartment.distanceToCenter || '',
+        bathrooms: Number(apartment.bathrooms) || 1,
+        notes: apartment.notes || '',
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'day_number' });
+    } catch (e) {
+      console.warn('Supabase upsert apartment error:', e);
+    }
+  }
+
   sendToPostgres('/api/db/apartments', 'POST', {
     ...apartment,
     price: Number(apartment.price) || 0,
   }).catch(() => {});
+
+  try {
+    const local = localStorage.getItem(APARTMENTS_STORAGE_KEY);
+    let list: UserApartment[] = local ? JSON.parse(local) : [];
+    list = list.filter((a) => a.id !== apartment.id);
+    list.push(apartment);
+    list.sort((a, b) => a.dayNumber - b.dayNumber);
+    localStorage.setItem(APARTMENTS_STORAGE_KEY, JSON.stringify(list));
+  } catch {}
 
   try {
     const cleanData = {
@@ -723,62 +1297,51 @@ export async function saveApartmentToCloud(apartment: UserApartment): Promise<vo
       cancellationPolicy_fr: apartment.cancellationPolicy_fr || apartment.cancellationPolicy || '',
       parking: apartment.parking,
       parking_es: apartment.parking_es || apartment.parking,
-      parking_fr: (apartment.parking_fr && !hasSpanishParking(apartment.parking_fr))
-        ? apartment.parking_fr
-        : translateApartmentField(apartment.parking || apartment.parking_fr || '', 'fr'),
+      parking_fr: apartment.parking_fr || apartment.parking,
       distanceToCenter: apartment.distanceToCenter,
       distanceToCenter_es: apartment.distanceToCenter_es || apartment.distanceToCenter,
-      distanceToCenter_fr: apartment.distanceToCenter_fr || translateApartmentField(apartment.distanceToCenter || '', 'fr'),
+      distanceToCenter_fr: apartment.distanceToCenter_fr || apartment.distanceToCenter,
       bathrooms: Number(apartment.bathrooms) || 1,
       notes: apartment.notes || '',
       notes_es: apartment.notes_es || apartment.notes || '',
-      notes_fr: (apartment.notes_fr && !hasSpanishNotes(apartment.notes_fr))
-        ? apartment.notes_fr
-        : translateApartmentField(apartment.notes || apartment.notes_fr || '', 'fr'),
+      notes_fr: apartment.notes_fr || apartment.notes || '',
       isSelected: apartment.isSelected !== undefined ? Boolean(apartment.isSelected) : true,
       updatedAt: new Date().toISOString(),
       createdAt: apartment.createdAt || new Date().toISOString(),
     };
     await setDoc(doc(db, 'apartments', apartment.id), cleanData);
-
-    // Update local cache as well
-    try {
-      const local = localStorage.getItem(APARTMENTS_STORAGE_KEY);
-      let list: UserApartment[] = local ? JSON.parse(local) : [];
-      list = list.filter((a) => a.id !== apartment.id);
-      list.push({ ...apartment, ...cleanData });
-      list.sort((a, b) => a.dayNumber - b.dayNumber);
-      localStorage.setItem(APARTMENTS_STORAGE_KEY, JSON.stringify(list));
-    } catch {
-      // ignore
-    }
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, path);
+    console.warn('Firestore apartment write notice:', error);
   }
 }
 
 export async function deleteApartmentFromCloud(id: string): Promise<void> {
-  const path = `apartments/${id}`;
+  const client = getSupabaseClient();
+  if (client) {
+    try {
+      await client.from('apartments').delete().eq('id', id);
+    } catch (e) {
+      console.warn('Supabase delete apartment error:', e);
+    }
+  }
+
   const dayNum = id.replace(/[^0-9]/g, '');
   if (dayNum) {
     sendToPostgres(`/api/db/apartments/${dayNum}`, 'DELETE').catch(() => {});
   }
+
+  try {
+    const local = localStorage.getItem(APARTMENTS_STORAGE_KEY);
+    if (local) {
+      const list: UserApartment[] = JSON.parse(local);
+      localStorage.setItem(APARTMENTS_STORAGE_KEY, JSON.stringify(list.filter((a) => a.id !== id)));
+    }
+  } catch {}
+
   try {
     await deleteDoc(doc(db, 'apartments', id));
-
-    // Update local cache
-    try {
-      const local = localStorage.getItem(APARTMENTS_STORAGE_KEY);
-      if (local) {
-        const list: UserApartment[] = JSON.parse(local);
-        const filtered = list.filter((a) => a.id !== id);
-        localStorage.setItem(APARTMENTS_STORAGE_KEY, JSON.stringify(filtered));
-      }
-    } catch {
-      // ignore
-    }
   } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, path);
+    console.warn('Firestore apartment delete notice:', error);
   }
 }
 

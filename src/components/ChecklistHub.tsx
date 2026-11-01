@@ -13,12 +13,14 @@ import {
   Luggage,
   ShieldAlert,
   ArrowRightLeft,
+  RefreshCw,
 } from 'lucide-react';
 import {
   subscribeToChecklist,
   toggleChecklistItemInCloud,
   addChecklistItemToCloud,
   deleteChecklistItemFromCloud,
+  fetchChecklistFromSupabase,
   ChecklistDoc,
   ChecklistCouple,
   DEFAULT_CHECKLIST,
@@ -32,14 +34,14 @@ export const ChecklistHub: React.FC = () => {
   const [items, setItems] = useState<ChecklistDoc[]>([]);
   const [activeTab, setActiveTab] = useState<'dual' | 'ByL' | 'AyM' | 'general'>('dual');
   const [filter, setFilter] = useState<'all' | 'pending' | 'completed'>('all');
-  const [dualInput, setDualInput] = useState('');
   const [quickInputByL, setQuickInputByL] = useState('');
   const [quickInputAyM, setQuickInputAyM] = useState('');
   const [quickInputGeneral, setQuickInputGeneral] = useState('');
   const [isAdding, setIsAdding] = useState(false);
   const [syncNotice, setSyncNotice] = useState<string | null>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
 
-  // Subscribe to real-time checklist items in Firestore
+  // Subscribe to real-time checklist items in Supabase / Postgres
   useEffect(() => {
     const unsub = subscribeToChecklist((docs) => {
       const map = new Map<string, ChecklistDoc>();
@@ -48,6 +50,19 @@ export const ChecklistHub: React.FC = () => {
     });
     return () => unsub();
   }, []);
+
+  const handleSyncFromSupabase = async () => {
+    setIsSyncing(true);
+    const fresh = await fetchChecklistFromSupabase();
+    if (fresh && fresh.length > 0) {
+      const map = new Map<string, ChecklistDoc>();
+      fresh.forEach((d) => map.set(d.id, d));
+      setItems(Array.from(map.values()));
+      setSyncNotice(isFr ? 'Checklist actualisée avec Supabase' : 'Checklist sincronizada con Supabase');
+      setTimeout(() => setSyncNotice(null), 2500);
+    }
+    setTimeout(() => setIsSyncing(false), 500);
+  };
 
   // Separate items by couple with deduplication
   const uniqueItems = Array.from(
@@ -94,37 +109,16 @@ export const ChecklistHub: React.FC = () => {
     clearFn();
     setIsAdding(true);
     try {
-      // Requisito: solo cuando la vista sea por parejas, al añadir una tarea se ha de añadir a las dos parejas
-      if (activeTab === 'dual' && (targetCouple === 'ByL' || targetCouple === 'AyM')) {
-        const [created1, created2] = await Promise.all([
-          addChecklistItemToCloud(trimmed, 'ByL', language),
-          addChecklistItemToCloud(trimmed, 'AyM', language),
-        ]);
-        setItems((prev) => {
-          const ids = new Set(prev.map((i) => i.id));
-          const toAdd: ChecklistDoc[] = [];
-          if (!ids.has(created1.id)) toAdd.push(created1);
-          if (!ids.has(created2.id)) toAdd.push(created2);
-          return toAdd.length > 0 ? [...prev, ...toAdd] : prev;
-        });
-        setSyncNotice(
-          isFr
-            ? '✓ Tâche ajoutée aux 2 couples (ByL et AyM) !'
-            : '✓ ¡Tarea añadida a las 2 parejas (ByL y AyM)!'
-        );
-      } else {
-        // Vista de una sola pareja o tarea general de vehículo
-        const created = await addChecklistItemToCloud(trimmed, targetCouple, language);
-        setItems((prev) => {
-          if (prev.some((item) => item.id === created.id)) return prev;
-          return [...prev, created];
-        });
-        setSyncNotice(
-          isFr
-            ? `✓ Tâche ajoutée à ${targetCouple === 'ByL' ? 'ByL' : targetCouple === 'AyM' ? 'AyM' : 'la liste commune'} !`
-            : `✓ ¡Tarea añadida a ${targetCouple === 'ByL' ? 'ByL' : targetCouple === 'AyM' ? 'AyM' : 'la lista común'}!`
-        );
-      }
+      const created = await addChecklistItemToCloud(trimmed, targetCouple, language);
+      setItems((prev) => {
+        if (prev.some((item) => item.id === created.id)) return prev;
+        return [...prev, created];
+      });
+      setSyncNotice(
+        isFr
+          ? `✓ Tâche ajoutée à ${targetCouple === 'ByL' ? 'ByL' : targetCouple === 'AyM' ? 'AyM' : 'la liste commune'} !`
+          : `✓ ¡Tarea añadida a ${targetCouple === 'ByL' ? 'ByL' : targetCouple === 'AyM' ? 'AyM' : 'la lista común'}!`
+      );
       setTimeout(() => setSyncNotice(null), 2500);
     } finally {
       setIsAdding(false);
@@ -251,9 +245,7 @@ export const ChecklistHub: React.FC = () => {
             value={quickInput}
             onChange={(e) => setQuickInput(e.target.value)}
             placeholder={
-              activeTab === 'dual' && couple !== 'general'
-                ? (isFr ? 'Ajouter pour les 2 couples (ByL & AyM)...' : 'Añadir para las 2 parejas (ByL y AyM)...')
-                : couple === 'ByL'
+              couple === 'ByL'
                 ? (isFr ? 'Ajouter tâche pour ByL...' : 'Añadir tarea para ByL...')
                 : couple === 'AyM'
                 ? (isFr ? 'Ajouter tâche pour AyM...' : 'Añadir tarea para AyM...')
@@ -267,11 +259,7 @@ export const ChecklistHub: React.FC = () => {
             className={`${colorStyles.btn} disabled:opacity-40 text-white font-mono text-[10px] font-bold px-2.5 py-1 rounded-lg flex items-center gap-1 cursor-pointer transition-colors flex-shrink-0`}
           >
             <Plus className="w-3 h-3" />
-            <span>
-              {activeTab === 'dual' && couple !== 'general'
-                ? (isFr ? '+ Aux 2' : '+ Ambas')
-                : (isFr ? 'Ajouter' : 'Añadir')}
-            </span>
+            <span>{isFr ? 'Ajouter' : 'Añadir'}</span>
           </button>
         </form>
 
@@ -513,6 +501,16 @@ export const ChecklistHub: React.FC = () => {
           </button>
           <span className="text-slate-700">|</span>
           <button
+            onClick={handleSyncFromSupabase}
+            disabled={isSyncing}
+            className="text-slate-400 hover:text-emerald-400 px-1.5 py-0.5 rounded transition-colors cursor-pointer flex items-center gap-1"
+            title={isFr ? 'Synchroniser directement avec Supabase' : 'Sincronizar directamente con Supabase'}
+          >
+            <RefreshCw className={`w-3 h-3 text-blue-400 ${isSyncing ? 'animate-spin' : ''}`} />
+            <span className="hidden sm:inline">{isFr ? 'Supabase Sync' : 'Sync Supabase'}</span>
+          </button>
+          <span className="text-slate-700">|</span>
+          <button
             onClick={handleRestoreDefaults}
             className="text-slate-400 hover:text-blue-400 px-1.5 py-0.5 rounded transition-colors cursor-pointer flex items-center gap-1"
             title={isFr ? 'Restaurer les checklists recommandées' : 'Restaurar checklists recomendadas'}
@@ -533,53 +531,6 @@ export const ChecklistHub: React.FC = () => {
       {/* Main Content Area based on Selected View Tab */}
       {activeTab === 'dual' && (
         <div className="space-y-3">
-          {/* Dual Unified Quick Add for Both Couples */}
-          <div className="bg-[#141414] border border-blue-500/30 rounded-xl p-3 shadow-md flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2.5">
-              <div className="p-1.5 rounded-lg bg-blue-500/15 border border-blue-500/30 text-blue-400">
-                <Users className="w-4 h-4" />
-              </div>
-              <div>
-                <span className="text-xs font-bold text-white font-mono block">
-                  {isFr ? 'Ajout simultané pour les deux couples (ByL & AyM)' : 'Añadir tarea a las dos parejas a la vez'}
-                </span>
-                <span className="text-[10px] text-slate-400">
-                  {isFr
-                    ? 'La tâche sera créée dans la liste de ByL et dans celle d\'AyM'
-                    : 'La comprobación se creará en la lista de ByL y en la de AyM simultáneamente'}
-                </span>
-              </div>
-            </div>
-
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                handleAdd(dualInput, 'ByL', () => setDualInput(''));
-              }}
-              className="flex-1 min-w-[280px] max-w-xl flex items-center gap-1.5"
-            >
-              <input
-                type="text"
-                value={dualInput}
-                onChange={(e) => setDualInput(e.target.value)}
-                placeholder={
-                  isFr
-                    ? 'Ajouter pour les deux couples (ex: Vérifier passeport, Parapluie...)'
-                    : 'Añadir para las dos parejas (ej. Revisar DNI, Cargadores, Chubasquero...)'
-                }
-                className="flex-1 bg-[#0A0A0A] border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 font-sans"
-              />
-              <button
-                type="submit"
-                disabled={isAdding || !dualInput.trim()}
-                className="bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white font-mono text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 cursor-pointer transition-colors flex-shrink-0 shadow"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>{isFr ? 'Ajouter aux 2' : 'Añadir a ambas'}</span>
-              </button>
-            </form>
-          </div>
-
           {/* Side-by-Side Dual Columns: ByL and AyM (Ultra-compact, maximum screen density) */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {/* Column 1: Pareja ByL */}

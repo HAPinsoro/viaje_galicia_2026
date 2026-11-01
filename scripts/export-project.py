@@ -44,7 +44,11 @@ EXCLUDE_FILES = {
     'galicia-trip-project.zip',
     'galicia-trip-project.tar.gz',
     'test_win.zip',
-    'test_download.zip'
+    'test_download.zip',
+    'download',
+    '.env',
+    '.env.local',
+    '.env.production'
 }
 
 def should_include(rel_path):
@@ -54,6 +58,10 @@ def should_include(rel_path):
             return False
     filename = os.path.basename(rel_path)
     if filename in EXCLUDE_FILES or filename.endswith('.log'):
+        return False
+    if filename.startswith('.env') and filename != '.env.example':
+        return False
+    if filename.startswith('download'):
         return False
     return True
 

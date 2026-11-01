@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { useAuth, CoupleId } from '../context/AuthContext';
+import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
+import { signIn, signUp, supabase } from '../services/auth';
 import {
   Lock,
   Mail,
@@ -10,25 +11,16 @@ import {
   ShieldCheck,
   AlertCircle,
   UserPlus,
-  KeyRound,
   CheckCircle2,
   Users,
-  Settings,
-  X,
-  Server,
 } from 'lucide-react';
 import bgGalicia from '../assets/images/galicia_dark_bg.jpg';
 
 export const LoginScreen: React.FC = () => {
   const {
     signInWithEmail,
-    signUpWithEmail,
     authError,
     clearError,
-    isConfigured,
-    supabaseUrl,
-    supabaseAnonKey,
-    updateSupabaseConfig,
   } = useAuth();
   const { language } = useLanguage();
   const isFr = language === 'fr';
@@ -37,16 +29,10 @@ export const LoginScreen: React.FC = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
-  const [selectedCouple, setSelectedCouple] = useState<CoupleId>('AyM');
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-
-  // Config modal for Supabase Anon Key
-  const [isConfigOpen, setIsConfigOpen] = useState(false);
-  const [inputUrl, setInputUrl] = useState(supabaseUrl || 'https://supabase.viajes.cloud');
-  const [inputKey, setInputKey] = useState(supabaseAnonKey || '');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -59,10 +45,14 @@ export const LoginScreen: React.FC = () => {
     const passVal = password.trim();
 
     if (mode === 'login') {
-      const res = await signInWithEmail(emailVal, passVal, selectedCouple);
+      const res = await signIn(emailVal, passVal);
       setIsSubmitting(false);
       if (res.error) {
         setLocalError(res.error);
+        return;
+      }
+      if (res.user) {
+        await signInWithEmail(emailVal, passVal);
       }
     } else {
       // Register
@@ -76,30 +66,18 @@ export const LoginScreen: React.FC = () => {
         return;
       }
 
-      const res = await signUpWithEmail(emailVal, passVal, selectedCouple, displayName.trim());
+      const res = await signUp(emailVal, passVal, displayName.trim());
       setIsSubmitting(false);
 
       if (res.error) {
         setLocalError(res.error);
+      } else if (res.session) {
+        await signInWithEmail(emailVal, passVal);
       } else if (res.message) {
         setSuccessMessage(res.message);
         setMode('login');
       }
     }
-  };
-
-  const handleSaveConfig = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!inputKey.trim()) {
-      setLocalError(isFr ? 'Clé Anon requise' : 'Se requiere la clave Anon de Supabase');
-      return;
-    }
-    updateSupabaseConfig(inputUrl.trim() || 'https://supabase.viajes.cloud', inputKey.trim());
-    setIsConfigOpen(false);
-    setLocalError(null);
-    setSuccessMessage(
-      isFr ? 'Supabase configuré avec succès' : 'Supabase conectado correctamente'
-    );
   };
 
   const errorMessage = localError || authError;
@@ -129,9 +107,6 @@ export const LoginScreen: React.FC = () => {
           <h2 className="text-sm uppercase tracking-[0.25em] font-semibold text-neutral-200 font-sans">
             {isFr ? 'Accès Privé · Galice 2026' : 'Acceso Privado · Galicia 2026'}
           </h2>
-          <p className="text-xs text-neutral-400 mt-1">
-            {isFr ? 'Authentification gérée par Supabase' : 'Autenticación gestionada por Supabase'}
-          </p>
 
           {/* Mode Switch Tabs */}
           <div className="flex items-center w-full max-w-xs bg-neutral-900/90 border border-neutral-800 rounded-xl p-1 mt-4">
@@ -168,47 +143,31 @@ export const LoginScreen: React.FC = () => {
           </div>
         </div>
 
-        {/* Supabase Connection Status Banner */}
-        <div className="mb-4">
-          {isConfigured ? (
-            <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-emerald-950/30 border border-emerald-500/20 text-emerald-400 text-xs">
-              <span className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                <span className="font-mono text-[11px] truncate max-w-[200px]">
-                  supabase.viajes.cloud
-                </span>
-              </span>
-              <button
-                type="button"
-                onClick={() => setIsConfigOpen(true)}
-                className="text-neutral-400 hover:text-neutral-200 text-[10px] flex items-center gap-1 cursor-pointer"
-                title="Configuración de Supabase"
-              >
-                <Settings className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          ) : (
-            <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-amber-950/40 border border-amber-500/30 text-amber-300 text-xs">
-              <span className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-amber-400" />
-                <span>{isFr ? 'Clé Anon requise' : 'Falta Clave Anon Supabase'}</span>
-              </span>
-              <button
-                type="button"
-                onClick={() => setIsConfigOpen(true)}
-                className="px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 text-[11px] font-medium border border-amber-500/40 cursor-pointer transition-all"
-              >
-                {isFr ? 'Configurer' : 'Pegar Clave'}
-              </button>
-            </div>
-          )}
-        </div>
-
         {/* Error Feedback */}
         {errorMessage && (
-          <div className="mb-4 p-3 rounded-xl bg-red-950/40 border border-red-500/20 text-red-400 text-xs flex items-center gap-2.5 animate-fadeIn">
-            <AlertCircle className="w-4 h-4 flex-shrink-0" />
-            <span className="font-medium">{errorMessage}</span>
+          <div className="mb-4 p-3.5 rounded-xl bg-red-950/60 border border-red-500/30 text-red-300 text-xs flex items-start gap-2.5 animate-fadeIn shadow-lg shadow-red-950/30">
+            <AlertCircle className="w-4 h-4 text-red-400 mt-0.5 flex-shrink-0" />
+            <div className="flex-1 space-y-1">
+              <span className="font-semibold text-red-200 block">
+                {isFr ? 'Erreur d’identification' : 'Credenciales no válidas'}
+              </span>
+              <span className="text-red-300/90 leading-relaxed block">{errorMessage}</span>
+              {mode === 'login' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode('register');
+                    clearError();
+                    setLocalError(null);
+                  }}
+                  className="text-[11px] text-amber-300 hover:text-amber-200 underline mt-1 cursor-pointer font-medium block"
+                >
+                  {isFr
+                    ? 'Vous n’avez pas encore de compte ? Cliquez ici pour créer un compte'
+                    : '¿No tienes cuenta aún? Pulsa aquí para Crear Cuenta'}
+                </button>
+              )}
+            </div>
           </div>
         )}
 
@@ -260,7 +219,11 @@ export const LoginScreen: React.FC = () => {
                   }
                 }}
                 placeholder={isFr ? 'votre@email.com' : 'tu@email.com'}
-                className="w-full bg-neutral-900/90 border border-neutral-800 rounded-xl pl-10 pr-4 py-2.5 text-sm text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all font-sans"
+                className={`w-full bg-neutral-900/90 border rounded-xl pl-10 pr-4 py-2.5 text-sm text-neutral-100 placeholder-neutral-500 focus:outline-none transition-all font-sans ${
+                  errorMessage
+                    ? 'border-red-500/60 focus:border-red-500 focus:ring-1 focus:ring-red-500/40'
+                    : 'border-neutral-800 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500'
+                }`}
               />
             </div>
           </div>
@@ -284,7 +247,11 @@ export const LoginScreen: React.FC = () => {
                   }
                 }}
                 placeholder={isFr ? '••••••••' : '••••••••'}
-                className="w-full bg-neutral-900/90 border border-neutral-800 rounded-xl pl-10 pr-11 py-2.5 text-sm text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all font-sans"
+                className={`w-full bg-neutral-900/90 border rounded-xl pl-10 pr-11 py-2.5 text-sm text-neutral-100 placeholder-neutral-500 focus:outline-none transition-all font-sans ${
+                  errorMessage
+                    ? 'border-red-500/60 focus:border-red-500 focus:ring-1 focus:ring-red-500/40'
+                    : 'border-neutral-800 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500'
+                }`}
               />
               <button
                 type="button"
@@ -297,39 +264,6 @@ export const LoginScreen: React.FC = () => {
             </div>
           </div>
 
-          {/* Couple Selection for Shared Itinerary & Apartment Votes */}
-          <div>
-            <label className="block text-[11px] text-neutral-400 uppercase tracking-wider mb-1.5 font-mono">
-              {isFr ? 'Équipage / Couple' : 'Pareja / Pasajeros'}
-            </label>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => setSelectedCouple('AyM')}
-                className={`py-2 px-3 rounded-xl border text-xs font-medium text-left flex items-center justify-between transition-all ${
-                  selectedCouple === 'AyM'
-                    ? 'bg-blue-600/20 border-blue-500 text-blue-300 shadow-sm'
-                    : 'bg-neutral-900/60 border-neutral-800 text-neutral-400 hover:border-neutral-700'
-                }`}
-              >
-                <span>Alberto & Mari</span>
-                <span className="text-[10px] font-mono text-neutral-500">AyM</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setSelectedCouple('ByL')}
-                className={`py-2 px-3 rounded-xl border text-xs font-medium text-left flex items-center justify-between transition-all ${
-                  selectedCouple === 'ByL'
-                    ? 'bg-emerald-600/20 border-emerald-500 text-emerald-300 shadow-sm'
-                    : 'bg-neutral-900/60 border-neutral-800 text-neutral-400 hover:border-neutral-700'
-                }`}
-              >
-                <span>Bruno & Loles</span>
-                <span className="text-[10px] font-mono text-neutral-500">ByL</span>
-              </button>
-            </div>
-          </div>
-
           <button
             type="submit"
             disabled={isSubmitting || !email || !password}
@@ -337,16 +271,16 @@ export const LoginScreen: React.FC = () => {
           >
             {isSubmitting ? (
               <span className="text-xs uppercase tracking-wider font-mono">
-                {isFr ? 'Authentification Supabase...' : 'Autenticando en Supabase...'}
+                {isFr ? 'Connexion en cours...' : 'Iniciando sesión...'}
               </span>
             ) : mode === 'login' ? (
               <>
-                <span>{isFr ? 'Entrer avec Supabase' : 'Acceder con Supabase'}</span>
+                <span>{isFr ? 'Entrer' : 'Acceder'}</span>
                 <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
               </>
             ) : (
               <>
-                <span>{isFr ? 'Créer le compte' : 'Crear Cuenta en Supabase'}</span>
+                <span>{isFr ? 'Créer le compte' : 'Crear Cuenta'}</span>
                 <UserPlus className="w-4 h-4 group-hover:scale-110 transition-transform" />
               </>
             )}
@@ -354,99 +288,13 @@ export const LoginScreen: React.FC = () => {
         </form>
 
         {/* Footer info */}
-        <div className="mt-6 pt-4 border-t border-neutral-900 flex items-center justify-between text-[11px] text-neutral-500 font-mono">
+        <div className="mt-6 pt-4 border-t border-neutral-900 flex items-center justify-center text-[11px] text-neutral-500 font-mono">
           <span className="flex items-center gap-1.5">
-            <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
-            Supabase Auth
+            <ShieldCheck className="w-3.5 h-3.5 text-emerald-500/70" />
+            {isFr ? 'Accès sécurisé' : 'Acceso seguro'}
           </span>
-          <button
-            type="button"
-            onClick={() => setIsConfigOpen(true)}
-            className="text-neutral-400 hover:text-emerald-400 flex items-center gap-1 text-[10px] transition-colors cursor-pointer"
-          >
-            <KeyRound className="w-3 h-3" />
-            Configuración VPS
-          </button>
         </div>
       </div>
-
-      {/* Supabase VPS Key Configuration Modal */}
-      {isConfigOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
-          <div className="w-full max-w-md bg-neutral-900 border border-neutral-800 rounded-2xl p-6 shadow-2xl relative text-neutral-200">
-            <button
-              onClick={() => setIsConfigOpen(false)}
-              className="absolute right-4 top-4 text-neutral-400 hover:text-white"
-            >
-              <X className="w-5 h-5" />
-            </button>
-
-            <div className="flex items-center gap-3 mb-4">
-              <div className="p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
-                <Server className="w-5 h-5" />
-              </div>
-              <div>
-                <h3 className="text-base font-bold text-white">Conexión a Supabase VPS</h3>
-                <p className="text-xs text-neutral-400">Hostinger · Coolify · Supabase</p>
-              </div>
-            </div>
-
-            <p className="text-xs text-neutral-300 mb-4 leading-relaxed">
-              Para que Supabase verifique los usuarios en tu VPS, se necesita la URL y la{' '}
-              <strong className="text-white">Clave Anon (pública)</strong> de tu servicio Supabase en Coolify.
-            </p>
-
-            <form onSubmit={handleSaveConfig} className="space-y-4">
-              <div>
-                <label className="block text-[11px] font-mono text-neutral-400 uppercase tracking-wider mb-1">
-                  URL de Supabase
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={inputUrl}
-                  onChange={(e) => setInputUrl(e.target.value)}
-                  placeholder="https://supabase.viajes.cloud"
-                  className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-3.5 py-2.5 text-xs text-white font-mono focus:outline-none focus:border-emerald-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-mono text-neutral-400 uppercase tracking-wider mb-1">
-                  Clave Anon (ANON_KEY / Public API Key)
-                </label>
-                <textarea
-                  rows={3}
-                  required
-                  value={inputKey}
-                  onChange={(e) => setInputKey(e.target.value)}
-                  placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6..."
-                  className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-3.5 py-2 text-xs text-white font-mono focus:outline-none focus:border-emerald-500 break-all"
-                />
-                <p className="text-[10px] text-neutral-500 mt-1">
-                  💡 Encuéntrala en Coolify: Entra en tu servicio <strong>Supabase</strong> &rarr; <strong>Variables de Entorno</strong> (busca <code className="text-neutral-400">ANON_KEY</code>) o en Supabase Studio &rarr; Project Settings &rarr; API.
-                </p>
-              </div>
-
-              <div className="flex items-center gap-2 pt-2">
-                <button
-                  type="submit"
-                  className="flex-1 py-2.5 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-semibold text-xs transition-colors cursor-pointer"
-                >
-                  Guardar y Conectar Supabase
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setIsConfigOpen(false)}
-                  className="py-2.5 px-4 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-xs transition-colors cursor-pointer"
-                >
-                  Cancelar
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

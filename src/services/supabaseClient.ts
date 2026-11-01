@@ -67,33 +67,49 @@ export function getSupabaseClient(): SupabaseClient | null {
   return null;
 }
 
+let syncPromise: Promise<{ configured: boolean; url: string }> | null = null;
+
 /**
  * Fetch server-side runtime config from /api/public-config (Coolify environment variables)
  */
 export async function syncRuntimeConfig(): Promise<{ configured: boolean; url: string }> {
-  try {
-    const res = await fetch('/api/public-config');
-    if (res.ok) {
-      const data = await res.json();
-      if (data.supabaseUrl) {
-        runtimeUrl = data.supabaseUrl.trim();
-      }
-      if (data.supabaseAnonKey) {
-        runtimeAnonKey = data.supabaseAnonKey.trim();
-      }
-      if (runtimeAnonKey && !clientInstance) {
-        clientInstance = null; // Re-create with runtime keys
-        getSupabaseClient();
-      }
-    }
-  } catch {
-    // Ignore offline or dev mode fetch errors
-  }
+  if (syncPromise) return syncPromise;
 
-  return {
-    configured: isSupabaseConfigured(),
-    url: getEffectiveSupabaseUrl(),
-  };
+  syncPromise = (async () => {
+    try {
+      const res = await fetch('/api/public-config');
+      if (res.ok) {
+        const data = await res.json();
+        let changed = false;
+        if (data.supabaseUrl && data.supabaseUrl.trim() !== runtimeUrl) {
+          runtimeUrl = data.supabaseUrl.trim();
+          changed = true;
+        }
+        if (data.supabaseAnonKey && data.supabaseAnonKey.trim() !== runtimeAnonKey) {
+          runtimeAnonKey = data.supabaseAnonKey.trim();
+          changed = true;
+        }
+        if (changed || (!clientInstance && isSupabaseConfigured())) {
+          clientInstance = null; // Re-create with runtime keys
+          getSupabaseClient();
+        }
+      }
+    } catch {
+      // Ignore offline or dev mode fetch errors
+    }
+
+    return {
+      configured: isSupabaseConfigured(),
+      url: getEffectiveSupabaseUrl(),
+    };
+  })();
+
+  return syncPromise;
+}
+
+// Auto-run runtime sync in browser
+if (typeof window !== 'undefined') {
+  syncRuntimeConfig().catch(() => {});
 }
 
 export function saveCustomSupabaseConfig(url: string, anonKey: string): void {

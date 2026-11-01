@@ -130,3 +130,44 @@ export async function initPostgresSchema() {
     client.release();
   }
 }
+
+// Function to seed database with local data
+export async function seedPostgresDatabase(): Promise<{ success: boolean; message: string; counts?: any }> {
+  if (!pool) {
+    return { success: false, message: 'PostgreSQL no está configurado.' };
+  }
+
+  const client = await pool.connect();
+  try {
+    const fs = await import('fs');
+    const path = await import('path');
+    const sqlPath = path.resolve(process.cwd(), 'seed-supabase.sql');
+
+    if (fs.existsSync(sqlPath)) {
+      const sqlContent = fs.readFileSync(sqlPath, 'utf8');
+      await client.query(sqlContent);
+
+      const aptCount = await client.query('SELECT COUNT(*) FROM apartments');
+      const chkCount = await client.query('SELECT COUNT(*) FROM checklist_items');
+      const expCount = await client.query('SELECT COUNT(*) FROM custom_expenses');
+
+      return {
+        success: true,
+        message: 'Base de datos poblada con éxito con los datos locales.',
+        counts: {
+          apartments: parseInt(aptCount.rows[0].count, 10),
+          checklist_items: parseInt(chkCount.rows[0].count, 10),
+          custom_expenses: parseInt(expCount.rows[0].count, 10),
+        },
+      };
+    } else {
+      return { success: false, message: 'Archivo seed-supabase.sql no encontrado.' };
+    }
+  } catch (err: any) {
+    console.error('[PostgreSQL] Error seeding database:', err);
+    return { success: false, message: err?.message || 'Error al poblar la base de datos' };
+  } finally {
+    client.release();
+  }
+}
+

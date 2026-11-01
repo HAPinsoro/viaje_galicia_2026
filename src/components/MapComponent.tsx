@@ -434,9 +434,22 @@ export const MapComponent: React.FC<MapComponentProps> = ({
   allDays,
   userApartments,
 }) => {
-  const apiKey =
-    import.meta.env.VITE_GOOGLE_MAPS_API_KEY ||
-    'AIzaSyD2M10m6SheEHKmLtfUcqS604NOyBy3PA4';
+  const [apiKey, setApiKey] = useState<string>(
+    import.meta.env.VITE_GOOGLE_MAPS_API_KEY || ''
+  );
+
+  useEffect(() => {
+    if (!apiKey) {
+      fetch('/api/public-config')
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (data?.googleMapsApiKey) {
+            setApiKey(data.googleMapsApiKey);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [apiKey]);
 
   const [activeMarker, setActiveMarker] = useState<{
     type: 'poi' | 'acc' | 'start';
