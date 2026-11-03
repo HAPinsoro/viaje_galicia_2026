@@ -9,6 +9,7 @@ import {
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { CustomExpense, UserApartment } from '../types/trip';
+import { FIXED_APARTMENTS } from '../data/galiciaRouteData';
 import {
   translateChecklistTitle,
   translateExpenseTitle,
@@ -170,34 +171,8 @@ export function mapDbRowToSettings(r: any): TripSettings {
 // Direct Supabase & PostgreSQL Query Helpers
 // =====================================================================
 export async function fetchApartmentsFromSupabase(): Promise<UserApartment[] | null> {
-  const client = getSupabaseClient();
-  if (client) {
-    try {
-      const { data, error } = await client
-        .from('apartments')
-        .select('*')
-        .order('day_number', { ascending: true });
-      if (!error && Array.isArray(data) && data.length > 0) {
-        return data.map(mapDbRowToApartment);
-      }
-    } catch (e) {
-      console.warn('Supabase client select apartments error:', e);
-    }
-  }
-
-  try {
-    const res = await fetch('/api/db/apartments');
-    if (res.ok) {
-      const data = await res.json();
-      if (Array.isArray(data) && data.length > 0) {
-        return data.map(mapDbRowToApartment);
-      }
-    }
-  } catch {
-    // fallback
-  }
-
-  return null;
+  // Los 9 apartamentos están fijados en el código de la aplicación (sin tabla en base de datos)
+  return FIXED_APARTMENTS;
 }
 
 export async function fetchChecklistFromSupabase(): Promise<ChecklistDoc[] | null> {
@@ -1094,242 +1069,50 @@ export async function deleteChecklistItemFromCloud(id: string): Promise<void> {
 }
 
 /**
- * Subscribe to 9 circular route apartments from Supabase table apartments as primary source of truth
+ * Provee los 9 apartamentos de la ruta circular fijados directamente en código (sin tabla en base de datos)
  */
 export function subscribeToApartments(
   onUpdate: (apartments: UserApartment[], source: 'cloud' | 'local') => void
 ): () => void {
-  let cached: UserApartment[] = [];
+  let list: UserApartment[] = [...FIXED_APARTMENTS];
   try {
     const local = localStorage.getItem(APARTMENTS_STORAGE_KEY);
     if (local) {
-      cached = JSON.parse(local);
-    }
-  } catch {}
-  onUpdate(cached, 'local');
-
-  let isSubscribed = true;
-  let supabaseChannel: any = null;
-
-  const syncSupabase = async () => {
-    await syncRuntimeConfig();
-    if (!isSubscribed) return;
-    const dbApartments = await fetchApartmentsFromSupabase();
-    if (dbApartments && dbApartments.length > 0 && isSubscribed) {
-      try {
-        localStorage.setItem(APARTMENTS_STORAGE_KEY, JSON.stringify(dbApartments));
-      } catch {}
-      onUpdate(dbApartments, 'cloud');
-    }
-  };
-
-  syncSupabase();
-
-  const client = getSupabaseClient();
-  if (client) {
-    try {
-      supabaseChannel = client
-        .channel(`realtime:apartments:${Date.now()}`)
-        .on(
-          'postgres_changes',
-          { event: '*', schema: 'public', table: 'apartments' },
-          async () => {
-            const fresh = await fetchApartmentsFromSupabase();
-            if (fresh && fresh.length > 0 && isSubscribed) {
-              try {
-                localStorage.setItem(APARTMENTS_STORAGE_KEY, JSON.stringify(fresh));
-              } catch {}
-              onUpdate(fresh, 'cloud');
-            }
-          }
-        )
-        .subscribe();
-    } catch (e) {
-      console.warn('Supabase realtime apartments error:', e);
-    }
-  }
-
-  const pollInterval = setInterval(() => {
-    if (isSubscribed) syncSupabase();
-  }, 15000);
-
-  // Firestore mirror / fallback
-  let firestoreUnsub: (() => void) | null = null;
-  try {
-    const apartmentsCol = collection(db, 'apartments');
-    firestoreUnsub = onSnapshot(
-      apartmentsCol,
-      (snapshot) => {
-        if (!snapshot.empty && isSubscribed) {
-          const items: UserApartment[] = [];
-          snapshot.forEach((snap) => {
-            const d = snap.data();
-            const nameEs = d.name_es || d.name || '';
-            const nameFr = d.name_fr || d.name || '';
-            const parkingEs = d.parking_es || d.parking || '';
-            const parkingFr = (d.parking_fr && !hasSpanishParking(d.parking_fr))
-              ? d.parking_fr
-              : (d.parking ? translateApartmentField(d.parking, 'fr') : '');
-            const distanceEs = d.distanceToCenter_es || d.distanceToCenter || '';
-            const distanceFr = d.distanceToCenter_fr || (distanceEs ? translateApartmentField(distanceEs, 'fr') : '');
-            const policyEs = d.cancellationPolicy_es || d.cancellationPolicy || undefined;
-            const policyFr = d.cancellationPolicy_fr || (policyEs ? translateApartmentField(policyEs, 'fr') : undefined);
-            const notesEs = d.notes_es || d.notes || '';
-            const notesFr = (d.notes_fr && !hasSpanishNotes(d.notes_fr))
-              ? d.notes_fr
-              : (d.notes ? translateApartmentField(d.notes, 'fr') : '');
-
-            items.push({
-              id: snap.id,
-              dayNumber: Number(d.dayNumber) || 1,
-              nightDate: d.nightDate || '',
-              city: d.city || '',
-              name: d.name || '',
-              name_es: nameEs,
-              name_fr: nameFr,
-              address: d.address || '',
-              price: Number(d.price) || 0,
-              checkInTime: d.checkInTime || '',
-              checkOutTime: d.checkOutTime || '',
-              freeCancellation: Boolean(d.freeCancellation),
-              cancellationPolicy: d.cancellationPolicy || undefined,
-              cancellationPolicy_es: policyEs,
-              cancellationPolicy_fr: policyFr,
-              parking: d.parking || '',
-              parking_es: parkingEs,
-              parking_fr: parkingFr,
-              distanceToCenter: d.distanceToCenter || '',
-              distanceToCenter_es: distanceEs,
-              distanceToCenter_fr: distanceFr,
-              bathrooms: Number(d.bathrooms) || 1,
-              notes: d.notes || '',
-              notes_es: notesEs,
-              notes_fr: notesFr,
-              isSelected: d.isSelected !== undefined ? Boolean(d.isSelected) : true,
-              createdAt: d.createdAt,
-              updatedAt: d.updatedAt,
-            });
-          });
-
-          items.sort((a, b) => a.dayNumber - b.dayNumber);
-          onUpdate(items, 'cloud');
-        }
-      },
-      (error) => {
-        console.warn('Firestore onSnapshot apartments notice:', error);
+      const parsed: UserApartment[] = JSON.parse(local);
+      const hasOldPlaceholders =
+        Array.isArray(parsed) &&
+        parsed.some(
+          (a) =>
+            a.id?.includes('-ourense') ||
+            a.name?.includes('As Burgas con Garaje') ||
+            a.name?.includes('Embarcadero Cíes')
+        );
+      if (hasOldPlaceholders) {
+        list = [...FIXED_APARTMENTS];
+        localStorage.setItem(APARTMENTS_STORAGE_KEY, JSON.stringify(list));
+      } else if (Array.isArray(parsed) && parsed.length > 0) {
+        list = parsed;
       }
-    );
+    }
   } catch {}
 
-  return () => {
-    isSubscribed = false;
-    clearInterval(pollInterval);
-    if (supabaseChannel) {
-      try {
-        supabaseChannel.unsubscribe();
-      } catch {}
-    }
-    if (firestoreUnsub) {
-      firestoreUnsub();
-    }
-  };
+  onUpdate(list, 'cloud');
+  return () => {};
 }
 
 export async function saveApartmentToCloud(apartment: UserApartment): Promise<void> {
-  const client = getSupabaseClient();
-  if (client) {
-    try {
-      await client.from('apartments').upsert({
-        id: apartment.id,
-        day_number: apartment.dayNumber,
-        night_date: apartment.nightDate || '',
-        city: apartment.city || '',
-        name: apartment.name,
-        name_es: apartment.name_es || apartment.name,
-        name_fr: apartment.name_fr || apartment.name,
-        address: apartment.address,
-        price: Number(apartment.price) || 0,
-        check_in_time: apartment.checkInTime || '15:00',
-        check_out_time: apartment.checkOutTime || '11:00',
-        free_cancellation: Boolean(apartment.freeCancellation),
-        cancellation_policy: apartment.cancellationPolicy || '',
-        parking: apartment.parking || '',
-        distance_to_center: apartment.distanceToCenter || '',
-        bathrooms: Number(apartment.bathrooms) || 1,
-        notes: apartment.notes || '',
-        updated_at: new Date().toISOString(),
-      }, { onConflict: 'day_number' });
-    } catch (e) {
-      console.warn('Supabase upsert apartment error:', e);
-    }
-  }
-
-  sendToPostgres('/api/db/apartments', 'POST', {
-    ...apartment,
-    price: Number(apartment.price) || 0,
-  }).catch(() => {});
-
+  // Los datos quedan fijos en código; guardamos cambios en localStorage para personalizaciones
   try {
     const local = localStorage.getItem(APARTMENTS_STORAGE_KEY);
-    let list: UserApartment[] = local ? JSON.parse(local) : [];
+    let list: UserApartment[] = local ? JSON.parse(local) : [...FIXED_APARTMENTS];
     list = list.filter((a) => a.id !== apartment.id);
     list.push(apartment);
     list.sort((a, b) => a.dayNumber - b.dayNumber);
     localStorage.setItem(APARTMENTS_STORAGE_KEY, JSON.stringify(list));
   } catch {}
-
-  try {
-    const cleanData = {
-      id: apartment.id,
-      dayNumber: apartment.dayNumber,
-      nightDate: apartment.nightDate || '',
-      city: apartment.city || '',
-      name: apartment.name,
-      name_es: apartment.name_es || apartment.name,
-      name_fr: apartment.name_fr || apartment.name,
-      address: apartment.address,
-      price: Number(apartment.price) || 0,
-      checkInTime: apartment.checkInTime || '',
-      checkOutTime: apartment.checkOutTime || '',
-      freeCancellation: Boolean(apartment.freeCancellation),
-      cancellationPolicy: apartment.cancellationPolicy || '',
-      cancellationPolicy_es: apartment.cancellationPolicy_es || apartment.cancellationPolicy || '',
-      cancellationPolicy_fr: apartment.cancellationPolicy_fr || apartment.cancellationPolicy || '',
-      parking: apartment.parking,
-      parking_es: apartment.parking_es || apartment.parking,
-      parking_fr: apartment.parking_fr || apartment.parking,
-      distanceToCenter: apartment.distanceToCenter,
-      distanceToCenter_es: apartment.distanceToCenter_es || apartment.distanceToCenter,
-      distanceToCenter_fr: apartment.distanceToCenter_fr || apartment.distanceToCenter,
-      bathrooms: Number(apartment.bathrooms) || 1,
-      notes: apartment.notes || '',
-      notes_es: apartment.notes_es || apartment.notes || '',
-      notes_fr: apartment.notes_fr || apartment.notes || '',
-      isSelected: apartment.isSelected !== undefined ? Boolean(apartment.isSelected) : true,
-      updatedAt: new Date().toISOString(),
-      createdAt: apartment.createdAt || new Date().toISOString(),
-    };
-    await setDoc(doc(db, 'apartments', apartment.id), cleanData);
-  } catch (error) {
-    console.warn('Firestore apartment write notice:', error);
-  }
 }
 
 export async function deleteApartmentFromCloud(id: string): Promise<void> {
-  const client = getSupabaseClient();
-  if (client) {
-    try {
-      await client.from('apartments').delete().eq('id', id);
-    } catch (e) {
-      console.warn('Supabase delete apartment error:', e);
-    }
-  }
-
-  const dayNum = id.replace(/[^0-9]/g, '');
-  if (dayNum) {
-    sendToPostgres(`/api/db/apartments/${dayNum}`, 'DELETE').catch(() => {});
-  }
-
   try {
     const local = localStorage.getItem(APARTMENTS_STORAGE_KEY);
     if (local) {
@@ -1337,12 +1120,6 @@ export async function deleteApartmentFromCloud(id: string): Promise<void> {
       localStorage.setItem(APARTMENTS_STORAGE_KEY, JSON.stringify(list.filter((a) => a.id !== id)));
     }
   } catch {}
-
-  try {
-    await deleteDoc(doc(db, 'apartments', id));
-  } catch (error) {
-    console.warn('Firestore apartment delete notice:', error);
-  }
 }
 
 const DAY_NOTES_STORAGE_KEY = 'galicia_trip_day_notes_v1';

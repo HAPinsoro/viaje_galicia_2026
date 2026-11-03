@@ -5,6 +5,7 @@ import path from 'path';
 import fs from 'fs';
 import { execSync } from 'child_process';
 import { initPostgresSchema, pool, isPostgresConfigured, seedPostgresDatabase } from './src/db/postgres';
+import { FIXED_APARTMENTS } from './src/data/galiciaRouteData';
 
 dotenv.config();
 
@@ -267,99 +268,17 @@ app.post('/api/db/seed', async (_req: Request, res: Response) => {
   }
 });
 
-// 2. Apartments Endpoints
-app.get('/api/db/apartments', async (_req: Request, res: Response) => {
-  if (!pool) return res.status(503).json({ error: 'Postgres not configured' });
-  try {
-    const { rows } = await pool.query('SELECT * FROM apartments ORDER BY day_number ASC');
-    const items = rows.map((r) => ({
-      id: r.id,
-      dayNumber: r.day_number,
-      nightDate: r.night_date,
-      city: r.city,
-      name: r.name,
-      name_es: r.name_es,
-      name_fr: r.name_fr,
-      address: r.address,
-      price: parseFloat(r.price) || 0,
-      checkInTime: r.check_in_time,
-      checkOutTime: r.check_out_time,
-      freeCancellation: r.free_cancellation,
-      cancellationPolicy: r.cancellation_policy,
-      parking: r.parking,
-      distanceToCenter: r.distance_to_center,
-      bathrooms: r.bathrooms,
-      notes: r.notes,
-      createdAt: r.created_at,
-      updatedAt: r.updated_at,
-    }));
-    return res.json(items);
-  } catch (err: any) {
-    return res.status(500).json({ error: err.message });
-  }
+// 2. Apartments Endpoints (Apartamentos fijos en código, sin tabla en base de datos)
+app.get('/api/db/apartments', (_req: Request, res: Response) => {
+  return res.json(FIXED_APARTMENTS);
 });
 
-app.post('/api/db/apartments', async (req: Request, res: Response) => {
-  if (!pool) return res.status(503).json({ error: 'Postgres not configured' });
-  const a = req.body;
-  try {
-    const query = `
-      INSERT INTO apartments (
-        id, day_number, night_date, city, name, name_es, name_fr, address,
-        price, check_in_time, check_out_time, free_cancellation, cancellation_policy,
-        parking, distance_to_center, bathrooms, notes, updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW())
-      ON CONFLICT (day_number) DO UPDATE SET
-        name = EXCLUDED.name,
-        name_es = EXCLUDED.name_es,
-        name_fr = EXCLUDED.name_fr,
-        address = EXCLUDED.address,
-        price = EXCLUDED.price,
-        check_in_time = EXCLUDED.check_in_time,
-        check_out_time = EXCLUDED.check_out_time,
-        free_cancellation = EXCLUDED.free_cancellation,
-        cancellation_policy = EXCLUDED.cancellation_policy,
-        parking = EXCLUDED.parking,
-        distance_to_center = EXCLUDED.distance_to_center,
-        bathrooms = EXCLUDED.bathrooms,
-        notes = EXCLUDED.notes,
-        updated_at = NOW()
-      RETURNING *;
-    `;
-    const values = [
-      a.id || `apt-day-${a.dayNumber}`,
-      a.dayNumber,
-      a.nightDate || '',
-      a.city || '',
-      a.name || '',
-      a.name_es || null,
-      a.name_fr || null,
-      a.address || '',
-      a.price || 0,
-      a.checkInTime || '15:00',
-      a.checkOutTime || '11:00',
-      a.freeCancellation ?? true,
-      a.cancellationPolicy || '',
-      a.parking || '',
-      a.distanceToCenter || '',
-      a.bathrooms || 1,
-      a.notes || '',
-    ];
-    const { rows } = await pool.query(query, values);
-    return res.json(rows[0]);
-  } catch (err: any) {
-    return res.status(500).json({ error: err.message });
-  }
+app.post('/api/db/apartments', (req: Request, res: Response) => {
+  return res.json({ success: true, message: 'Apartamentos fijados en código', data: req.body });
 });
 
-app.delete('/api/db/apartments/:dayNumber', async (req: Request, res: Response) => {
-  if (!pool) return res.status(503).json({ error: 'Postgres not configured' });
-  try {
-    await pool.query('DELETE FROM apartments WHERE day_number = $1', [parseInt(req.params.dayNumber, 10)]);
-    return res.json({ success: true });
-  } catch (err: any) {
-    return res.status(500).json({ error: err.message });
-  }
+app.delete('/api/db/apartments/:dayNumber', (_req: Request, res: Response) => {
+  return res.json({ success: true, message: 'Apartamentos fijados en código' });
 });
 
 // 3. Custom Expenses Endpoints

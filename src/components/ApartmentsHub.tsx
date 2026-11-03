@@ -74,8 +74,11 @@ export const ApartmentsHub: React.FC<ApartmentsHubProps> = () => {
     return () => unsub();
   }, []);
 
-  const handleSyncFromSupabase = async () => {
+  const handleRestoreDefaults = async () => {
     setIsSyncing(true);
+    try {
+      localStorage.removeItem('galicia_trip_user_apartments_v1');
+    } catch {}
     const fresh = await fetchApartmentsFromSupabase();
     if (fresh && fresh.length > 0) {
       setApartments(fresh);
@@ -273,17 +276,17 @@ export const ApartmentsHub: React.FC<ApartmentsHubProps> = () => {
             </div>
             <div>
               <span className="text-[10px] font-mono uppercase tracking-widest text-blue-400 font-bold">
-                {isFr ? 'Gestion des Hébergements Personnalisés (2 Couples)' : 'Gestión de Alojamientos Personalizados (2 Parejas)'}
+                {isFr ? 'Hébergements Confirmés dans le Code (2 Couples)' : 'Alojamientos Confirmados en Código (2 Parejas)'}
               </span>
               <h2 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
-                {isFr ? 'Vos 9 Hébergements du Circuit' : 'Tus 9 Apartamentos de Ruta'}
+                {isFr ? '9 Nuits Confirmées en Route' : '9 Noches Confirmadas en Ruta'}
               </h2>
             </div>
           </div>
           <p className="text-xs sm:text-sm text-slate-400 max-w-2xl leading-relaxed">
             {isFr
-              ? 'Enregistrez les hébergements pour chaque nuit. Pour chaque adresse, les informations clés sont mémorisées : Nom, Adresse, Prix total et par couple, Heures de check-in et check-out, Annulation gratuite, Parking, Distance du centre, Salles de bain et Notes.'
-              : 'Registra los apartamentos para cada noche. Para cada alojamiento se guardan los datos clave: Nombre, Dirección, Precio total y por pareja, Hora de Check-in y Check-out, Cancelación gratuita, Aparcamiento, Distancia al centro, Baños y Notas.'}
+              ? 'Les données des 9 hébergements sont intégrées directement dans le code de l\'application (sans table en base de données). Chaque adresse inclut parking garanti, budget maîtrisé (<120€/nuit), annulation gratuite et horaires de check-in/out.'
+              : 'Los datos de los 9 alojamientos están integrados directamente en el código de la aplicación (sin tabla en base de datos). Cada apartamento incluye parking garantizado, presupuesto optimizado (<120€/noche), cancelación gratuita y horarios de check-in/out.'}
           </p>
         </div>
 
@@ -351,13 +354,13 @@ export const ApartmentsHub: React.FC<ApartmentsHubProps> = () => {
 
         <div className="flex items-center gap-2">
           <button
-            onClick={handleSyncFromSupabase}
+            onClick={handleRestoreDefaults}
             disabled={isSyncing}
             title={isFr ? 'Recharger directement depuis Supabase' : 'Recargar directamente desde Supabase'}
             className="bg-[#141414] hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white px-3 py-1.5 rounded-lg text-xs font-mono font-medium flex items-center gap-1.5 transition-all cursor-pointer"
           >
             <RefreshCw className={`w-3.5 h-3.5 text-blue-400 ${isSyncing ? 'animate-spin' : ''}`} />
-            <span>{isFr ? 'Sync Supabase' : 'Sync Supabase'}</span>
+            <span>{isFr ? 'Données Fixes' : 'Restaurar Fijos'}</span>
           </button>
           <button
             onClick={handleCopySummary}

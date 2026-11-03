@@ -63,30 +63,8 @@ export async function initPostgresSchema() {
       );
     `);
 
-    // 2. Apartments Table
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS apartments (
-        id VARCHAR(100) PRIMARY KEY,
-        day_number INTEGER NOT NULL UNIQUE,
-        night_date VARCHAR(100),
-        city VARCHAR(100) NOT NULL,
-        name VARCHAR(255) NOT NULL,
-        name_es VARCHAR(255),
-        name_fr VARCHAR(255),
-        address TEXT,
-        price NUMERIC DEFAULT 0,
-        check_in_time VARCHAR(50),
-        check_out_time VARCHAR(50),
-        free_cancellation BOOLEAN DEFAULT TRUE,
-        cancellation_policy TEXT,
-        parking TEXT,
-        distance_to_center TEXT,
-        bathrooms INTEGER DEFAULT 1,
-        notes TEXT,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-      );
-    `);
+    // 2. Tabla de apartamentos eliminada (los datos quedan fijados en el código)
+    await client.query(`DROP TABLE IF EXISTS apartments CASCADE;`);
 
     // 3. Custom Expenses Table (with ByL / AyM couple attribution)
     await client.query(`
@@ -147,15 +125,13 @@ export async function seedPostgresDatabase(): Promise<{ success: boolean; messag
       const sqlContent = fs.readFileSync(sqlPath, 'utf8');
       await client.query(sqlContent);
 
-      const aptCount = await client.query('SELECT COUNT(*) FROM apartments');
       const chkCount = await client.query('SELECT COUNT(*) FROM checklist_items');
       const expCount = await client.query('SELECT COUNT(*) FROM custom_expenses');
 
       return {
         success: true,
-        message: 'Base de datos poblada con éxito con los datos locales.',
+        message: 'Base de datos poblada con éxito (los apartamentos están fijados en código).',
         counts: {
-          apartments: parseInt(aptCount.rows[0].count, 10),
           checklist_items: parseInt(chkCount.rows[0].count, 10),
           custom_expenses: parseInt(expCount.rows[0].count, 10),
         },

@@ -1,6 +1,6 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { ROUTE_DAYS, TRIP_OVERVIEW, TARGET_NIGHTS } from '../data/galiciaRouteData';
+import { ROUTE_DAYS, TRIP_OVERVIEW, TARGET_NIGHTS, FIXED_APARTMENTS } from '../data/galiciaRouteData';
 import { CustomExpense, UserApartment } from '../types/trip';
 import { DAY_TRANSLATIONS, translateExpenseTitle, translateApartmentField } from '../i18n/translations';
 
@@ -42,7 +42,7 @@ export function generateTripPDF(options?: PDFTripOptions) {
       // ignore
     }
   }
-  userApts = userApts || [];
+  userApts = userApts && userApts.length > 0 ? userApts : FIXED_APARTMENTS;
 
   const totalKm = TRIP_OVERVIEW.totalKmEstimated;
   const fuelLiters = (totalKm * consumption) / 100;
@@ -246,14 +246,16 @@ export function generateTripPDF(options?: PDFTripOptions) {
 
     let lodgingText = isFr ? 'Retour a Pinsoro (Maison)' : 'Llegada a Pinsoro (Hogar)';
     if (day.dayNumber <= 9) {
-      if (apt) {
-        const aptName = isFr ? apt.name_fr || apt.name : apt.name;
-        const aptParking = isFr ? apt.parking_fr || translateApartmentField(apt.parking, 'fr') : apt.parking;
-        lodgingText = `${aptName}\n${apt.price} EUR (~${(apt.price / 2).toFixed(1)} EUR/${isFr ? 'couple' : 'pareja'})\nCheck-in: ${apt.checkInTime || '15:00'} | Out: ${apt.checkOutTime || '11:00'}\n[P] ${aptParking}`;
+      const resolvedApt = apt || (day.accommodation.isDefined ? day.accommodation : null);
+      if (resolvedApt) {
+        const aptName = isFr ? (resolvedApt as any).name_fr || resolvedApt.name : resolvedApt.name;
+        const aptPrice = (resolvedApt as any).price ?? (resolvedApt as any).pricePerNightFor4 ?? 0;
+        const aptParking = isFr ? (resolvedApt as any).parking_fr || translateApartmentField(resolvedApt.parking || '', 'fr') : (resolvedApt.parking || 'Parking incluido');
+        lodgingText = `${aptName}\n${aptPrice} EUR (~${(aptPrice / 2).toFixed(1)} EUR/${isFr ? 'couple' : 'pareja'})\nCheck-in: ${resolvedApt.checkInTime || '15:00'} | Out: ${resolvedApt.checkOutTime || '11:00'}\n[P] ${aptParking}`;
       } else {
         lodgingText = isFr
-          ? `Hebergement a ${day.destination}\n(En attente)`
-          : `Apartamento en ${day.destination}\n(Pendiente de registrar)`;
+          ? `Hebergement a ${day.destination}`
+          : `Apartamento en ${day.destination}`;
       }
     }
     return [
