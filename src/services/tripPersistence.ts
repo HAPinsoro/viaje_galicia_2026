@@ -1074,26 +1074,10 @@ export async function deleteChecklistItemFromCloud(id: string): Promise<void> {
 export function subscribeToApartments(
   onUpdate: (apartments: UserApartment[], source: 'cloud' | 'local') => void
 ): () => void {
-  let list: UserApartment[] = [...FIXED_APARTMENTS];
+  // Datos fijados en código según especificación
+  const list: UserApartment[] = [...FIXED_APARTMENTS];
   try {
-    const local = localStorage.getItem(APARTMENTS_STORAGE_KEY);
-    if (local) {
-      const parsed: UserApartment[] = JSON.parse(local);
-      const hasOldPlaceholders =
-        Array.isArray(parsed) &&
-        parsed.some(
-          (a) =>
-            a.id?.includes('-ourense') ||
-            a.name?.includes('As Burgas con Garaje') ||
-            a.name?.includes('Embarcadero Cíes')
-        );
-      if (hasOldPlaceholders) {
-        list = [...FIXED_APARTMENTS];
-        localStorage.setItem(APARTMENTS_STORAGE_KEY, JSON.stringify(list));
-      } else if (Array.isArray(parsed) && parsed.length > 0) {
-        list = parsed;
-      }
-    }
+    localStorage.setItem(APARTMENTS_STORAGE_KEY, JSON.stringify(list));
   } catch {}
 
   onUpdate(list, 'cloud');
